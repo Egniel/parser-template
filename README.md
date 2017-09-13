@@ -1,4 +1,7 @@
 ## Django django-project parser template
+### Why tho?
+This template contains generic code for all parsers. Models, settings, posting function, management commands
+
 ### Installation
 `django-admin startproject --template=https://github.com/WinterCitizen/parser-template/archive/master.zip parser-name`
 
