@@ -1,9 +1,13 @@
+import json
 import logging
 
 import requests
 from celery.task import task
 from django.conf import settings
+from django.core import serializers
+from requests import RequestException, Timeout
 
+from events.encoders import ObjectWithTimestampEncoder
 from events.models import Event, EventCategory
 
 logger = logging.getLogger('{{ project_name }}')
@@ -11,7 +15,7 @@ logger = logging.getLogger('{{ project_name }}')
 
 @task(name='events.post_events')
 def post_events():
-    suffix_url = "/events/"
+    suffix_url = "/events/multilanguage-events/"
     url = settings.MIDDLEWARE_STORAGE_URL + suffix_url
 
     qs = Event.objects.filter(
@@ -22,26 +26,16 @@ def post_events():
     logger.debug('Trying to post {} events'.format(qs.count()))
 
     for event in qs:
-
-        payload = {
-            'title': event.title,
-            'place_title': event.place_title,
-            'address': event.address,
-            'city': event.city,
-            'description': event.description[:4095],
-            'start_time': int(event.start_time.timestamp()),
-            'end_time': int(event.end_time.timestamp()),
-            'origin_url': event.origin_url,
-            'booking_url': event.booking_url,
-            'origin': event.origin,
-            'cover': event.cover,
-            # 'category': event.category, # Until we dont have cat mapping
-            'language': settings.LANGUAGE_ID,
-        }
+        event_json_data = serializers.serialize(
+            'json', [event, ], cls=ObjectWithTimestampEncoder,
+            use_natural_foreign_keys=True,
+        )
+        event_data = json.loads(event_json_data)[0]
+        payload = event_data.get('fields')
 
         try:
             r = requests.post(url, json=payload)
-        except:
+        except (RequestException, ConnectionError, Timeout):
             logger.debug(
                 "We've problem with continue posting, posted {} events".format(
                     posted_counter))
