@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'events',
+    'modeltranslation',
 ]
 
 MIDDLEWARE = [
@@ -165,8 +166,12 @@ LOGGING = {
     },
 }
 
+MODELTRANSLATION_LANGUAGES = (
+    'en', # TODO: Change this to real language 
+)
+
+DEFAULT_LANGUAGE = MODELTRANSLATION_LANGUAGES[0]
+
 MIDDLEWARE_STORAGE_URL = 'http://192.168.88.244:8000'
 
 ORIGIN = '{{ project_name }}'  # TODO: Change this to real origin
-
-MODELTRANSLATION_LANGUAGES = ('en', )  # TODO: Change this to real language
