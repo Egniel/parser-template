@@ -1,6 +1,8 @@
 from django.core.management.base import BaseCommand
 
+from events.tasks import post_events
+
 
 class Command(BaseCommand):
     def handle(self, *args, **options):
-        pass
+        post_events.delay()

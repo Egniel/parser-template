@@ -106,7 +106,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'UTC'  # TODO: Change timezone
 
 USE_I18N = True
 
@@ -143,9 +143,9 @@ LOGGING = {
     },
 
     'loggers': {
-        'django.request': {
+        'django': {
             'handlers': ['graypy'],
-            'level': 'ERROR',
+            'level': 'INFO',
             'propagate': True,
         },
         '{{ project_name }}': {
@@ -167,5 +167,6 @@ LOGGING = {
 
 MIDDLEWARE_STORAGE_URL = 'http://192.168.88.244:8000'
 
-LANGUAGE_ID = 1
+ORIGIN = '{{ project_name }}'  # TODO: Change this to real origin
 
+MODELTRANSLATION_LANGUAGES = ('en', )  # TODO: Change this to real language
