@@ -1,19 +1,42 @@
-import json
 import logging
+import json
+from datetime import datetime
+from datetime import timedelta
 
 import requests
-from celery.task import task
+from bs4 import BeautifulSoup
 from django.conf import settings
 from django.core import serializers
+from django.utils import timezone
+from django.utils.translation import override
 from requests import RequestException, Timeout
 
 from events.encoders import ObjectWithTimestampEncoder
 from events.models import Event, EventCategory
+from {{ project_name }}.celery import app
+
+
+curr_timezone = timezone.get_default_timezone()
+
+current_date = timezone.now()
 
 logger = logging.getLogger('{{ project_name }}')
 
+root_url = '{{ project_name }}'  # TODO: Change to real root url
 
-@task(name='events.post_events')
+
+def add_root(url):
+    if not url:
+        return None
+    if '://' not in url:
+        if url[0] is not '/':
+            url = '/' + url
+        return root_url + url
+    else:
+        return url
+
+
+@app.task(name='events.post_events')
 def post_events():
     suffix_url = "/events/multilanguage-events/"
     url = settings.MIDDLEWARE_STORAGE_URL + suffix_url
