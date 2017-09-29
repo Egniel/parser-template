@@ -33,6 +33,9 @@ class Event(models.Model):
 class EventCategory(models.Model):
     title = models.CharField(max_length=128, verbose_name='имя')
 
+    def natural_key(self):
+        return self.title
+
     class Meta:
         verbose_name = 'категория событий'
         verbose_name_plural = 'категории событий'
