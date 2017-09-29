@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/{{ docs_version }}/ref/settings/
 """
 
 import os
+import re
 
 # Build paths inside the project like this: os.path.join(BASE_DIR, ...)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -167,11 +168,13 @@ LOGGING = {
 }
 
 MODELTRANSLATION_LANGUAGES = (
-    'en', # TODO: Change this to real language 
+    'en',  # TODO: Change this to real language
 )
 
 DEFAULT_LANGUAGE = MODELTRANSLATION_LANGUAGES[0]
 
 MIDDLEWARE_STORAGE_URL = 'http://192.168.88.244:8000'
 
-ORIGIN = '{{ project_name }}'  # TODO: Change this to real origin
+ROOT_URL = '{{ project_name }}'  # TODO: Change this to real root
+
+ORIGIN = re.search(r'(?<=://)[^/]*', ROOT_URL).group()

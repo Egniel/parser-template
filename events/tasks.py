@@ -22,18 +22,7 @@ current_date = timezone.now()
 
 logger = logging.getLogger('{{ project_name }}')
 
-root_url = '{{ project_name }}'  # TODO: Change to real root url
-
-
-def add_root(url):
-    if not url:
-        return None
-    if '://' not in url:
-        if url[0] is not '/':
-            url = '/' + url
-        return root_url + url
-    else:
-        return url
+root_url = settings.ROOT_URL
 
 
 @app.task(name='events.post_events')
