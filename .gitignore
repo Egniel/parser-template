@@ -2,4 +2,6 @@
 .idea
 db.sqlite3
 .cache
-
+*.venv
+*_venv
+*.orig

@@ -4,9 +4,9 @@ billiard==3.5.0.3
 celery==4.1.0
 certifi==2017.7.27.1
 chardet==3.0.4
-Django
-graypy==0.2.14
-django-modeltranslation
+Django>=1.11
+django-modeltranslation>=0.12.1
+graypy>=0.2.14
 idna==2.6
 kombu==4.1.0
 pytz==2017.2

@@ -5,5 +5,5 @@ from events.models import Event
 
 
 @register(Event)
-class Temp(TranslationOptions):
+class EventTranslationOptions(TranslationOptions):
     fields = ('title', 'description', 'origin_url', 'booking_url')

@@ -25,9 +25,10 @@ class Event(models.Model):
     origin = models.CharField(max_length=300,
                               default=settings.ORIGIN)
     booking_url = models.CharField(max_length=512, blank=True, null=True)
+    free = models.BooleanField(default=False)
 
     def __str__(self):
-        return self.title
+        return 'Title: {}, Date: {}'.format(self.title, self.start_time)
 
 
 class EventCategory(models.Model):
