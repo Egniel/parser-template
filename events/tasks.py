@@ -1,5 +1,5 @@
-import logging
 import json
+import logging
 from datetime import datetime
 from datetime import timedelta
 
@@ -8,21 +8,28 @@ from bs4 import BeautifulSoup
 from django.conf import settings
 from django.core import serializers
 from django.utils import timezone
-from django.utils.translation import override
-from requests import RequestException, Timeout
+from django.utils import translation
+from requests import ConnectionError
+from requests import RequestException
+from requests import Timeout
 
+import events.utils as utils
 from events.encoders import ObjectWithTimestampEncoder
-from events.models import Event, EventCategory
+from events.models import Event
+from events.models import EventCategory
 from {{ project_name }}.celery import app
 
 
 curr_timezone = timezone.get_default_timezone()
 
-current_date = timezone.now()
-
 logger = logging.getLogger('{{ project_name }}')
 
-root_url = settings.ROOT_URL
+current_date_and_time = timezone.now()
+
+
+@app.task()
+def parse_events():
+    pass
 
 
 @app.task(name='events.post_events')

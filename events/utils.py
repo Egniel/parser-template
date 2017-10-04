@@ -98,12 +98,12 @@ def safe_select_one(soup, css_selector, attr=None, default=None, limit=1):
     '''
     if css_selector is None:
         return default
-    
+
     if limit != 1:
         select = soup.select(css_selector, limit=limit)
     else:
         select = soup.select_one(css_selector)
-    
+
     if select is None:
         return default
 
@@ -119,12 +119,21 @@ def safe_select_one(soup, css_selector, attr=None, default=None, limit=1):
     return select
 
 
-def date_range_generator(start_date, end_date, *, format_=None, timezone=None):
+def date_range_generator(start_date, end_date, *, format_=None, timezone=None,
+                         timezone_obj=None):
     if format_:
         start_date = datetime.strptime(start_date, format_)
-        end_date = datetime.strptime(end_date, format_)
+        if not end_date:
+            end_date = start_date.replace(hour=23, minute=59)
+        else:
+            end_date = datetime.strptime(end_date, format_)
     if timezone:
         start_date = pytz.timezone(timezone).localize(start_date)
+        end_date = pytz.timezone(timezone).localize(end_date)
+    elif timezone_obj:
+        print('Localized')
+        start_date = timezone_obj.localize(start_date)
+        end_date = timezone_obj.localize(end_date)
 
     for day in range((end_date - start_date).days + 1):
         yield start_date + timedelta(days=day)
@@ -188,13 +197,11 @@ def fetch_elements_on_page_by_url_until_generator(
 
 
 def update_fields_by_select_match(
-        url, fields, fields_to_update=None, fields_to_ignore=None):
+        soup, fields, fields_to_update=None, fields_to_ignore=None):
     """Update sent 'fields' dict with data matched on page using bs4 selectors.
 
     Params
     ------
-    ulr : str
-        Url of page where to search.
     fields : dict
         Dict of fields to update, with tuple values containing following data:
             first : css string selector referring directly to element.
@@ -208,7 +215,6 @@ def update_fields_by_select_match(
         A list of fields to ignore. Used when fields_to_update is None to
             specifie which fields to not update.
     """
-    soup = get_soup(url)
 
     if fields_to_update:
         for field_name in fields_to_update:
