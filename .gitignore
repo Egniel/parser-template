@@ -5,3 +5,5 @@
 *.venv
 *_venv
 *.orig
+delete_events.py
+delete_event_categories.py
