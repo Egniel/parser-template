@@ -1,8 +1,10 @@
 from datetime import datetime
 from datetime import timedelta
+import re
 import itertools
 
 import requests
+from requests import RequestException, Timeout, ConnectionError
 from django.conf import settings
 from bs4 import BeautifulSoup
 
@@ -30,8 +32,8 @@ def get_format(string, order, *, defaults={}):
             '%m': r'(?P<month_digit>\d\d)',
             '%y': r'(?P<year_short>\d\d)',
             '%Y': r'(?P<year>\d\d\d\d)',
-            '%H': r'(?P<hour>\d\d)',
-            '%I': r'(?P<hour_short>\d\d)',
+            '%H': r'(?P<hour>\d\d?)',
+            '%I': r'(?P<hour_short>\d\d?)',
             '%p': r'(?P<period>AM|PM|am|pm)',
             '%M': r'(?P<minute>\d\d)',
             '%S': r'(?P<second>\d\d)',
@@ -69,13 +71,13 @@ def get_format(string, order, *, defaults={}):
     return string, format_
 
 
-def get_soup(url, *params, parser='html.parser'):
-    url = add_base(url)
+def get_soup(url, method='get', params=None, parser='html.parser'):
+    url = add_root(url)
     if url is None:
         return None
 
     try:
-        page = requests.get(url, *params)
+        page = getattr(requests, method)(url, params=params)
     except (RequestException, ConnectionError, Timeout):
         return None
     if page.status_code != 200:
@@ -84,7 +86,7 @@ def get_soup(url, *params, parser='html.parser'):
     return BeautifulSoup(page.content, parser)
 
 
-def safe_select_one(soup, css_selector, attr=None, default=None):
+def safe_select_one(soup, css_selector, attr=None, default=None, limit=1):
     '''Return regular bs4.select_one value or attr value if attr defined.
 
     Arguments
@@ -96,7 +98,12 @@ def safe_select_one(soup, css_selector, attr=None, default=None):
     '''
     if css_selector is None:
         return default
-    select = soup.select_one(css_selector)
+    
+    if limit != 1:
+        select = soup.select(css_selector, limit=limit)
+    else:
+        select = soup.select_one(css_selector)
+    
     if select is None:
         return default
 
@@ -180,7 +187,7 @@ def fetch_elements_on_page_by_url_until_generator(
             break
 
 
-def update_by_select_match(
+def update_fields_by_select_match(
         url, fields, fields_to_update=None, fields_to_ignore=None):
     """Update sent 'fields' dict with data matched on page using bs4 selectors.
 
