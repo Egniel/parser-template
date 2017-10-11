@@ -4,4 +4,4 @@
 .cache
 *.venv
 *.orig
-*_dev
+*_local.*
