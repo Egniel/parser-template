@@ -3,8 +3,5 @@
 *.sqlite3
 .cache
 *.venv
-*_venv
 *.orig
-delete_events.py
-delete_event_categories.py
-settings_local.py
+*_dev
