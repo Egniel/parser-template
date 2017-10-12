@@ -8,6 +8,39 @@ from requests import RequestException, Timeout, ConnectionError
 from django.conf import settings
 from bs4 import BeautifulSoup
 
+class ResponseIsNot200Error(Exception):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
+get_format_standart_regexps = {
+    '%a': r'(?P<weekday_short>Mon|Tue|Wed|Thu|Fri|Sat|Sun)',
+    '%A': (r'(?P<weekday>Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sun'
+           'day)'),
+    '%w': r'(?P<weekday_digit>[0-6])',
+    '%d': r'(?P<day>\d\d?)',
+    '%b': r'(?P<month_short>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)',
+    '%B': (r'(?P<month>January|February|March|April|May|June|July|August|Septe'
+           'mber|October|November|December)'),
+    '%m': r'(?P<month_digit>\d\d)',
+    '%y': r'(?P<year_short>\d\d)',
+    '%Y': r'(?P<year>\d\d\d\d)',
+    '%H': r'(?P<hour>\d\d?)',
+    '%I': r'(?P<hour_short>\d\d?)',
+    '%p': r'(?P<period>AM|PM|am|pm)',
+    '%M': r'(?P<minute>\d\d)',
+    '%S': r'(?P<second>\d\d)',
+    '%f': r'(?P<microsecond>\d\d\d\d\d\d)',
+    '%z': r'(?P<UTC>[+-]\d\d\d\d)',
+    '%Z': r'(?P<time_zone>UTC|EST|CST)',
+    '%j': r'(?P<day_of_year>\d\d\d)',
+    '%U': r'(?P<week_of_year_sunday>\d\d)',
+    '%W': r'(?P<day_of_year_monday>\d\d)',
+    # '%c': r'(?P<full_date>Tue Aug 16 21:30:00 1988)',
+    '%x': r'(?P<date>\d\d[/.-]\d\d[/.-]\d\d)',
+    '%X': r'(?P<time>\d\d:\d\d:\d\d)',
+}
+
 
 def add_root(url):
     if not url:
@@ -20,74 +53,48 @@ def add_root(url):
         return url
 
 
-def get_format(string, order, *, defaults={}):
-    if not defaults:
-        defaults.update({
-            '%a': r'(?P<weekday_short>Mon|Tue|Wed|Thu|Fri|Sat|Sun)',
-            '%A': r'(?P<weekday>Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)',
-            '%w': r'(?P<weekday_digit>[0-6])',
-            '%d': r'(?P<day>\d\d?)',
-            '%b': r'(?P<month_short>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)',
-            '%B': r'(?P<month>January|February|March|April|May|June|July|August|September|October|November|December)',
-            '%m': r'(?P<month_digit>\d\d)',
-            '%y': r'(?P<year_short>\d\d)',
-            '%Y': r'(?P<year>\d\d\d\d)',
-            '%H': r'(?P<hour>\d\d?)',
-            '%I': r'(?P<hour_short>\d\d?)',
-            '%p': r'(?P<period>AM|PM|am|pm)',
-            '%M': r'(?P<minute>\d\d)',
-            '%S': r'(?P<second>\d\d)',
-            '%f': r'(?P<microsecond>\d\d\d\d\d\d)',
-            '%z': r'(?P<UTC>[+-]\d\d\d\d)',
-            '%Z': r'(?P<time_zone>UTC|EST|CST)',
-            '%j': r'(?P<day_of_year>\d\d\d)',
-            '%U': r'(?P<week_of_year_sunday>\d\d)',
-            '%W': r'(?P<day_of_year_monday>\d\d)',
-            # '%c': r'(?P<full_date>Tue Aug 16 21:30:00 1988)',
-            '%x': r'(?P<date>\d\d[/.-]\d\d[/.-]\d\d)',
-            '%X': r'(?P<time>\d\d:\d\d:\d\d)',
-        })
+def get_format(string, order, *, regexps=get_format_standart_regexps):
+    """Return valid datetime.strptime format from given string and order.
 
-    format_ = string
+    #TODO
+    """
+    datetime_format = string
 
     for element in order:
         # For regexs
         if len(element) > 2:
-            format_ = re.sub(
-                element.format(**defaults),
+            datetime_format = re.sub(
+                element.format(**regexps),
                 # Find a better way
                 re.sub(r'\([^)]*\)|{|}', '', element),
-                format_,
+                datetime_format,
                 1
             )
         # For strightforward key
         else:
-            format_ = re.sub(defaults.get(element), element, format_, 1)
+            datetime_format = re.sub(
+                regexps.get(element), element, datetime_format, 1)
 
-    # Keys not described in order
-    for format_sym, regex in defaults.items():
-        format_ = re.sub(regex, format_sym, format_, 1)
+    # Auto complete Keys not described in order
+    for format_sym, regex in regexps.items():
+        datetime_format = re.sub(regex, format_sym, datetime_format, 1)
 
-    return string, format_
+    return string, datetime_format
 
 
-def get_soup(url, method='get', params=None, parser='html.parser'):
+def get_soup(url, *, method='get', parser='html.parser', **kwargs):
     url = add_root(url)
-    if url is None:
-        return None
 
-    try:
-        page = getattr(requests, method)(url, params=params)
-    except (RequestException, ConnectionError, Timeout):
-        return None
+    page = getattr(requests, method)(url, **kwargs)
     if page.status_code != 200:
-        return None
+        raise ResponseIsNot200Error(
+            'Response from \'{}\' is not 200'.format(page.url))
 
     return BeautifulSoup(page.content, parser)
 
 
 def safe_select_one(soup, css_selector, attr=None, default=None, limit=1):
-    '''Return regular bs4.select_one value or attr value if attr defined.
+    """Return regular bs4.select_one value or attr value if attr defined.
 
     Arguments
     ---------
@@ -95,7 +102,7 @@ def safe_select_one(soup, css_selector, attr=None, default=None, limit=1):
         Attribute to get. If is None then regular select_one value returned.
     default : any, optional
         Value to return in any except cases (no select found, no attr)
-    '''
+    """
     if css_selector is None:
         return default
 
@@ -119,23 +126,22 @@ def safe_select_one(soup, css_selector, attr=None, default=None, limit=1):
     return select
 
 
-def date_range_generator(start_date, end_date, *, format_=None, timezone=None,
-                         timezone_obj=None):
+def date_range_generator(
+        start_date, end_date, *, format_=None, timezone_obj=None):
     if format_:
         start_date = datetime.strptime(start_date, format_)
         if not end_date:
             end_date = start_date.replace(hour=23, minute=59)
         else:
             end_date = datetime.strptime(end_date, format_)
-    if timezone:
-        start_date = pytz.timezone(timezone).localize(start_date)
-        end_date = pytz.timezone(timezone).localize(end_date)
-    elif timezone_obj:
-        print('Localized')
+    if timezone_obj:
         start_date = timezone_obj.localize(start_date)
         end_date = timezone_obj.localize(end_date)
 
-    for day in range((end_date - start_date).days + 1):
+    yield start_date
+    start_date = start_date.replace(hour=00, minute=00)
+
+    for day in range((end_date - start_date).days):
         yield start_date + timedelta(days=day)
 
 

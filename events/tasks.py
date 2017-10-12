@@ -24,8 +24,6 @@ curr_timezone = timezone.get_default_timezone()
 
 logger = logging.getLogger('{{ project_name }}')
 
-current_date_and_time = timezone.now()
-
 
 @app.task()
 def parse_events():
