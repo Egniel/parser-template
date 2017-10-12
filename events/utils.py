@@ -4,9 +4,9 @@ import re
 import itertools
 
 import requests
-from requests import RequestException, Timeout, ConnectionError
 from django.conf import settings
 from bs4 import BeautifulSoup
+
 
 class ResponseIsNot200Error(Exception):
     def __init__(self, *args, **kwargs):
@@ -53,19 +53,57 @@ def add_root(url):
         return url
 
 
-def get_format(string, order, *, regexps=get_format_standart_regexps):
-    """Return valid datetime.strptime format from given string and order.
+def get_format(string, replace_order, *, regexps=get_format_standart_regexps):
+    """Return given string and valid datetime.strptime format.
 
-    #TODO
+    Function use regexps described in 'regexps' dict (as values) to search
+    matches in given 'string'. When it does match anything it will
+    replace match with key of matched regexp.
+    Matching ocurrs by order described in 'replace_order' tuple.
+    'replace_order' tuple must contain keys for 'regexps' dictionary
+    in format "{key}". Like so you describe two things in one time:
+      regular expression to search (it takes from 'regexps' dict by this key);
+      on what to replace (match will be replaced to this key);
+
+    You also can use look ahead/behind assertion for these values to spefify
+    key placement in the 'string'.
+
+    Example:
+    --------
+    # Used default 'get_format_standart_regexps' table
+                                                    # Look behind assertion
+    get_format('2017 04 12 05:30', ('{%Y}', '{%d}', '(?<=:){%M}'))
+    # Will return
+    ('2017 04 12 05:30', '%Y %d 12 05:%M')
+
+    ## Another example
+
+    get_format('13:00 2017 October 12', ('(?<={%B}){%m}', '{%d}', '{%Y}'))
+    # Will return
+                             # \/ This is misstake of your order.
+    ('13:00 2017 October 12', '%d:00 %Y October %m')
+
+
+    Params:
+    -------
+    string : str
+        String to get format from.
+    replace_order : tuple of str
+        A list of formatted strings. Must only contain keys described in
+        'regexps' dictionary.
+    regexps : dict
+        A dictionary of regular expressions. Contain data in following format:
+            key - regular string;
+            value - regular expression;
     """
     datetime_format = string
 
-    for element in order:
-        # For regexs
+    for element in replace_order:
+        # For order element using look ahead/behind assertion
         if len(element) > 2:
             datetime_format = re.sub(
                 element.format(**regexps),
-                # Find a better way
+                # Get key name from regexp with look ahead/behind assertion
                 re.sub(r'\([^)]*\)|{|}', '', element),
                 datetime_format,
                 1
@@ -75,7 +113,7 @@ def get_format(string, order, *, regexps=get_format_standart_regexps):
             datetime_format = re.sub(
                 regexps.get(element), element, datetime_format, 1)
 
-    # Auto complete Keys not described in order
+    # Auto complete Keys not described in replace_order
     for format_sym, regex in regexps.items():
         datetime_format = re.sub(regex, format_sym, datetime_format, 1)
 
@@ -102,6 +140,8 @@ def safe_select_one(soup, css_selector, attr=None, default=None, limit=1):
         Attribute to get. If is None then regular select_one value returned.
     default : any, optional
         Value to return in any except cases (no select found, no attr)
+    limit : int
+        See BeautifulSoup docs for 'select' function.
     """
     if css_selector is None:
         return default
@@ -115,7 +155,7 @@ def safe_select_one(soup, css_selector, attr=None, default=None, limit=1):
         return default
 
     if attr:
-        # Try to get attr from bs4_tag.attrs dictionalry(for tag.href etc).
+        # Try to get attr from bs4_tag.attrs dictionary(for tag.href etc).
         select_attr = select.get(attr)
         if select_attr is None:
             # Otherwise return regular attr or default(for tag.text etc).
@@ -178,19 +218,6 @@ def fetch_elements_on_page_by_url_until_generator(
         Site's start page number.
 
     """
-    for page in itertools.count(start_page):
-        soup = get_soup(url_template.format(page=page))
-
-        for element in soup.select(selector):
-            yield element
-
-        condition_element = soup.select_one(until)
-        if bool(condition_element) != state:
-            break
-
-
-def fetch_elements_on_page_by_url_until_generator(
-        url_template, selector, *, until, state=True, start_page=1):
     for page in itertools.count(start_page):
         soup = get_soup(url_template.format(page=page))
 
