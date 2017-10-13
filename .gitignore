@@ -1,7 +1,8 @@
 *.pyc
 .idea
-db.sqlite3
+.vscode
+*.sqlite3
 .cache
 *.venv
-*_venv
 *.orig
+*_local.*

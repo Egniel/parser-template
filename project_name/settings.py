@@ -173,8 +173,12 @@ MODELTRANSLATION_LANGUAGES = (
 
 DEFAULT_LANGUAGE = MODELTRANSLATION_LANGUAGES[0]
 
-MIDDLEWARE_STORAGE_URL = 'http://192.168.88.244:8000'
-
 ROOT_URL = '{{ project_name }}'  # TODO: Change this to real root
 
 ORIGIN = re.search(r'(?<=://)[^/]*', ROOT_URL).group()
+
+try:
+    from .settings_local import *  # noqa
+except ImportError:
+    import logging
+    logging.warn("There's no local settings file, running with stock settings")
