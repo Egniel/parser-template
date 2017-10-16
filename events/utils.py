@@ -54,71 +54,117 @@ def add_root(url):
         return url
 
 
-def get_format(string, replace_order, *, regexps=get_format_standart_regexps):
-    """Return given string and valid datetime.strptime format.
+def get_format(
+      string, replace_order, *, regexps=get_format_standart_regexps, **kwargs):
+    """Return valid datetime.strptime format by given string and order.
 
-    Function use regexps described in 'regexps' dict (as values) to search
-    matches in given 'string'. When it does match anything it will
-    replace match with key of matched regexp.
-    Matching ocurrs by order described in 'replace_order' tuple.
-    'replace_order' tuple must contain keys for 'regexps' dictionary
-    in format "{key}". Like so you describe two things in one time:
-      regular expression to search (it takes from 'regexps' dict by this key);
-      on what to replace (match will be replaced to this key);
-
-    You also can use look ahead/behind assertion for these values to spefify
-    key placement in the 'string'.
-
-    Example:
-    --------
-    # Used default 'get_format_standart_regexps' table
-                                                    # Look behind assertion
-    get_format('2017 04 12 05:30', ('{%Y}', '{%d}', '(?<=:){%M}'))
-    # Will return
-    ('2017 04 12 05:30', '%Y %d 12 05:%M')
-
-    ## Another example
-
-    get_format('13:00 2017 October 12', ('(?<={%B}){%m}', '{%d}', '{%Y}'))
-    # Will return
-                             # \/ This is misstake of your order.
-    ('13:00 2017 October 12', '%d:00 %Y October %m')
-
+    Function iterates over 'replace_order' tuple (which is a tuple of valid
+    keys for 'regexps' dictionary), on each iteration it uses current
+    'replace_order' element to get regular expression from 'regexps' dict, and
+    try to find match in 'string' by given regular expression. If match is
+    found, then whole match will be replaced with a key of regular expression
+    that was used to find match. You can describe one 'replace_order' for few
+    different format types. You also can use look ahead/behind assertion to
+    specify where key supposed to be in the 'string'.
 
     Params:
     -------
     string : str
         String to get format from.
     replace_order : tuple of str
-        A list of formatted strings. Must only contain keys described in
-        'regexps' dictionary.
+        tuple of valid keys for 'regexps' dictionary. Must only contain keys
+        described in 'regexps' dictionary, keys also can be represented as
+        regular expressions.
     regexps : dict
         A dictionary of regular expressions. Contain data in following format:
-            key - regular string;
+            key - simple string;
             value - regular expression;
     """
+    if kwargs:
+        regexps.update(kwargs)
+
     datetime_format = string
+    matched_keys = []
 
-    for element in replace_order:
-        # For order element using look ahead/behind assertion
-        if len(element) > 2:
-            datetime_format = re.sub(
-                element.format(**regexps),
-                # Get key name from regexp with look ahead/behind assertion
-                re.sub(r'\([^)]*\)|{|}', '', element),
-                datetime_format,
-                1
-            )
-        # For strightforward key
+    for regexp_key in replace_order:
+        # If regexp_key is represented as regular expression:
+        if '{' in regexp_key:
+            # Fill format replacement fields ('{%key}') with regexps.
+            regexp = regexp_key.format(**regexps)
+            # Extract key name from regexp
+            # By replacing anything in '()' and symbols '{', '}' to ''.
+            regexp_key = re.sub(r'\([^)]*\)|{|}', '', regexp_key)
         else:
-            datetime_format = re.sub(
-                regexps.get(element), element, datetime_format, 1)
+            # Otherwise 'regexp_key' is a regular key, just get regexp.
+            regexp = regexps.get(regexp_key)
 
-    # Auto complete Keys not described in replace_order
-    for format_sym, regex in regexps.items():
-        datetime_format = re.sub(regex, format_sym, datetime_format, 1)
+        # Don't process keys which are already matched.
+        if regexp_key in matched_keys:
+            continue
 
-    return string, datetime_format
+        datetime_format = re.sub(
+            regexp,  # Find match.
+            regexp_key,  # Replace to key.
+            datetime_format,
+            count=1  # Replace only first match.
+        )
+
+        matched_keys.append(regexp_key)
+
+    return datetime_format
+
+
+def pop_from_str_by_regexp(string, regexp, default=None):
+    match = re.search(regexp, string)
+    if match:
+        match = match.group()
+        return string.replace(match, ''), match
+    else:
+        return string, default
+
+
+def complement_each_other(
+        pieces, fetch_order, regexps=get_format_standart_regexps):
+    dictified_pieces = []
+
+    # Transfer strings to dict
+    for piece in pieces:
+        matched_keys = []
+        current_piece_dict = {}
+        dictified_pieces.append(current_piece_dict)
+
+        for regexp_key in fetch_order:
+            if '{' in regexp_key:
+                # Fill format replacement fields ('{%key}') with regexps.
+                regexp = regexp_key.format(**regexps)
+                # Extract key name from regexp
+                # By replacing anything in '()' and symbols '{', '}' to ''.
+                regexp_key = re.sub(r'\([^)]*\)|{|}', '', regexp_key)
+            else:
+                # Otherwise 'regexp_key' is a regular key, just get regexp.
+                regexp = regexps.get(regexp_key)
+
+            # Don't process keys which are already matched.
+            if regexp_key in matched_keys:
+                continue
+
+            piece, match = pop_from_str_by_regexp(piece, regexp)
+
+            if match:
+                current_piece_dict[regexp_key] = match
+                matched_keys.append(regexp_key)
+
+    for piece_dict in dictified_pieces:
+        for another_piece_dict in dictified_pieces:
+            if piece_dict is not another_piece_dict:
+                for key in another_piece_dict:
+                    if key not in piece_dict:
+                        piece_dict[key] = another_piece_dict[key]
+
+    return tuple(
+            (' '.join(piece_dict.keys()), ' '.join(piece_dict.values()))
+            for piece_dict in dictified_pieces
+        )
 
 
 def get_soup(url, *, method='get', parser='html.parser', **kwargs):
