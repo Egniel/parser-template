@@ -191,17 +191,13 @@ def get_soup(url, *, method='get', parser='html.parser', **kwargs):
     return BeautifulSoup(page.content, parser)
 
 
-def date_range_generator(
-        start_date, end_date, *, format_=None, timezone_obj=None):
+def date_range_generator(start_date, end_date, *, format_=None):
     if format_:
         start_date = datetime.strptime(start_date, format_)
         if not end_date:
             end_date = start_date.replace(hour=23, minute=59)
         else:
             end_date = datetime.strptime(end_date, format_)
-    if timezone_obj:
-        start_date = timezone_obj.localize(start_date)
-        end_date = timezone_obj.localize(end_date)
 
     yield start_date
     start_date = start_date.replace(hour=00, minute=00)
@@ -210,7 +206,7 @@ def date_range_generator(
         yield start_date + timedelta(days=day)
 
 
-def fetch_elements_on_page_generator(url, selector):
+def fetch_from_page_generator(url, selector):
     """Yield all elements from site page matched by 'selector' selector."""
     soup = get_soup(url)
 
@@ -218,30 +214,32 @@ def fetch_elements_on_page_generator(url, selector):
         yield element
 
 
-def fetch_elements_on_page_by_url_until_generator(
-        url_template, selector, *, until, state=True, start_page=1):
+def fetch_from_page_until_by_url_generator(
+                               url_template, selector, *, until, start_page=1):
     """Yield all elements from site page matched by 'selector' selector.
 
-    Generator iterates over site pages by 'url_template', yileds all elements
-    matched by 'selector', until element specified by 'until' selector
-    is found (or not found depending on 'state' value).
+    Generator iterates over site pages using 'url_template' (which have to
+    contain 'page' format's replacement field), yileds all elements matched by
+    'selector', until 'until' function returns 'True' (soup of current page
+    passed on every iteration of function).
 
     Parameters
     ----------
     url_template : str
         Template string with format input '{page}' for specifying page.
     selector : str
-        BeautifulSoup selector for link search. All matches will be yielded,
-        so you must spefify selector referring directly to elements you search.
-    until : str
-        BeautifulSoup selector for condition element search. Condition element
-        specifies when to stop iterating over pages.
-    state : bool
-        Specifies trigger for iteration ending.
-        True: iterate until 'until' element is currently found on page,
-        False: iterate until 'until' element is currently not found on page.
+        Selector for bs4 'select' method used for elements search. All matches
+        will be yielded, so you must spefify selector referring directly to
+        elements you want to get.
+    until : function
+        Function which will be called at the end of every page iteration. Soup
+        of current page will be passed as only argumet, return value used to
+        verify continue iteration or not (True - continue, False - stop).
+        Supposed to be used to search some elements on page which will be only
+        either on every page except last, either only on last page to use them
+        as triggers to stop iterating.
     start_page : int
-        Site's start page number.
+        Page number to start iterate from.
     """
     for page in itertools.count(start_page):
         soup = get_soup(url_template.format(page=page))
@@ -249,31 +247,30 @@ def fetch_elements_on_page_by_url_until_generator(
         for element in soup.select(selector):
             yield element
 
-        condition_element = soup.select_one(until)
-        if bool(condition_element) != state:
+        if not until(soup):
             break
 
 
-def getattr_in_select(soup, css_selector, attr=None, default=None, limit=1):
+def getattr_in_select(soup, css_selector, attr=None, default=None):
     '''Return regular bs4.select_one value or attr value if attr defined.
 
     Arguments
     ---------
+    soup : BeautifulSoup
+        Page soup to search elements in.
     attr : str, optional
-        Attribute to get. If is None then regular select_one value returned.
+        Attribute to get. If is None then regular select_one value will be
+        returned.
     default : any, optional
-        Value to return in any except cases (no select found, no attr)
+        Value to return in any except cases (no select found, no attr).
     '''
-    if limit is 1:
-        select = soup.select_one(css_selector)
-    else:
-        return soup.select(css_selector, limit=limit)
+    select = soup.select_one(css_selector)
 
     if select is None:
         return default
 
     if attr:
-        # Try to get attr from bs4_tag.attrs dictionalry(for tag.href etc).
+        # Try to get attr from bs4_tag.attrs dictionary(for tag.href etc).
         select_attr = select.get(attr)
         if select_attr is None:
             # Otherwise return regular attr or default(for tag.text etc).
@@ -284,36 +281,21 @@ def getattr_in_select(soup, css_selector, attr=None, default=None, limit=1):
     return select
 
 
-def update_fields_by_select_match(
-        soup, fields, fields_to_update=None, fields_to_ignore=None):
-    """Update sent 'fields' dict with data matched on page using bs4 selectors.
+def get_fields_by_select_match(soup, fields):
+    """Return dict of 'getattr_in_select' results by given 'fields' dict.
 
     Params
     ------
-    fields : dict
-        Dict of fields to update, with tuple values containing following data:
-            first : css string selector referring directly to element.
-            second(optional) : attribute to get from selected object.
-            default(optional) : default value to set if selector returned None
-                or attribute does not exist.
-    fields_to_update : tuple
-        A list of fields to update. If None - all fields will be updated
-            (Except fields listed in fields_to_ignore).
-    fields_to_ignore : tuple
-        A list of fields to ignore. Used when fields_to_update is None to
-            specifie which fields to not update.
+    soup : BeautifulSoup
+        Page soup to search elements in.
+    fields : dictionary
+        Dictionary where key - name of field, value - tuple of arguments for
+        'getattr_in_select' function.
     """
-
-    if fields_to_update:
-        for field_name in fields_to_update:
-            fields[field_name] = getattr_in_select(
-                soup, *fields[field_name])
-    else:
-        for field_name in fields:
-            if fields_to_ignore and field_name in fields_to_ignore:
-                continue
-            fields[field_name] = getattr_in_select(
-                soup, *fields[field_name])
+    return {
+        field_name: getattr_in_select(soup, *fields[field_name])
+        for field_name in fields
+        }
 
 
 def validate_event_fields(fields, *other_field_names):
@@ -322,10 +304,14 @@ def validate_event_fields(fields, *other_field_names):
     if not fields.get('address') and fields.get('place_title'):
         return False
 
+    # Validate fields which are required for 'Event' model.
+    # (fields which can't be null, blank, and have no defaults)
     for field_name in EVENT_REQUIRED_FIELDS:
+        # Check that field exists and has value,
         if not fields.get(field_name):
             return False
 
+    # Validate your castom fields.
     for field_name in other_field_names:
         if not fields.get(field_name):
             return False
@@ -339,11 +325,10 @@ def dump_to_db(
         fields['start_time'] = timezone.localize(fields['start_time'])
         fields['end_time'] = timezone.localize(fields['end_time'])
 
-    categories = fields.pop('categories')
-
     if not dates:
         dates = date_range_generator(fields['start_time'], fields['end_time'])
 
+    categories = fields.pop('categories')
     with translation.override(language):
         for date_and_time in dates:
             event_obj, created = Event.objects.update_or_create(
