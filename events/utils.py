@@ -3,10 +3,23 @@ from datetime import timedelta
 import re
 import itertools
 
-from funcy import get_in
 import requests
 from django.conf import settings
 from bs4 import BeautifulSoup
+from django.utils import translation
+from django.db.models.fields import NOT_PROVIDED
+
+from events.models import Event
+from events.models import EventCategory
+
+EVENT_REQUIRED_FIELDS = tuple(
+    field.name
+    for field in Event._meta.fields if (
+        field.blank is False and
+        field.null is False and
+        field.default is NOT_PROVIDED
+        )
+)
 
 
 class ResponseIsNot200Error(Exception):
@@ -301,3 +314,49 @@ def update_fields_by_select_match(
                 continue
             fields[field_name] = getattr_in_select(
                 soup, *fields[field_name])
+
+
+def validate_event_fields(fields, *other_field_names):
+    """Check that 'fields' dict contain all required fields of Event model."""
+    # At least one must exist
+    if not fields.get('address') and fields.get('place_title'):
+        return False
+
+    for field_name in EVENT_REQUIRED_FIELDS:
+        if not fields.get(field_name):
+            return False
+
+    for field_name in other_field_names:
+        if not fields.get(field_name):
+            return False
+
+    return True
+
+
+def dump_to_db(
+        fields, language=settings.DEFAULT_LANGUAGE, dates=None, timezone=None):
+    if timezone:
+        fields['start_time'] = timezone.localize(fields['start_time'])
+        fields['end_time'] = timezone.localize(fields['end_time'])
+
+    categories = fields.pop('categories')
+
+    if not dates:
+        dates = date_range_generator(fields['start_time'], fields['end_time'])
+
+    with translation.override(language):
+        for date_and_time in dates:
+            event_obj, created = Event.objects.update_or_create(
+                origin_url=fields['origin_url'],
+                start_time=date_and_time,
+                end_time=fields.pop(
+                    'end_time',
+                    # Otherwise use default:
+                    date_and_time.replace(hour=23, minute=59)),
+                defaults=fields,
+            )
+
+            if created and categories:
+                for category in categories:
+                    event_obj.categories.add(
+                        EventCategory.objects.get_or_create(title=category)[0])
