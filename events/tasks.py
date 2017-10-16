@@ -26,8 +26,40 @@ logger = logging.getLogger('{{ project_name }}')
 
 
 @app.task()
-def parse_events():
-    pass
+def process_event_page(url, category):
+    print('Started')
+    soup = utils.get_soup(url)
+
+    fields = dict(
+        title=('.item-name', 'text'),
+        place_title=('.item-venue', 'text'),
+        dates=('.start-date'),
+        start_time=('.start-date', 'text'),
+        description=('.tituloIntermedia + div', 'text', ''),
+        cover=('[alt="Img"]', 'src'),
+    )
+
+    utils.update_fields_by_get_in_select(soup, fields)
+
+    fields['end_time'] = fields['start_time']
+    fields['city'] = settings.CITY
+    fields['origin_url'] = url
+    fields['booking_url'] = url
+
+    if utils.validate_event_fields(fields) is False:
+        print('Not valid')
+        return
+
+    fields['categories'] = (category,)
+    fields['start_time'] = dateparser.parse(fields['start_time'])
+
+    fields['dates'] = tuple(
+        dateparser.parse(date)
+        for date in fields['dates']
+    )
+
+    utils.dump_to_db(fields, timezone=curr_timezone)
+    print('Done')
 
 
 @app.task(name='events.post_events')
