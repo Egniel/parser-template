@@ -3,10 +3,23 @@ from datetime import timedelta
 import re
 import itertools
 
-from funcy import get_in
 import requests
 from django.conf import settings
 from bs4 import BeautifulSoup
+from django.utils import translation
+from django.db.models.fields import NOT_PROVIDED
+
+from events.models import Event
+from events.models import EventCategory
+
+EVENT_REQUIRED_FIELDS = tuple(
+    field.name
+    for field in Event._meta.fields if (
+        field.blank is False and
+        field.null is False and
+        field.default is NOT_PROVIDED
+        )
+)
 
 
 class ResponseIsNot200Error(Exception):
@@ -54,71 +67,117 @@ def add_root(url):
         return url
 
 
-def get_format(string, replace_order, *, regexps=get_format_standart_regexps):
-    """Return given string and valid datetime.strptime format.
+def get_format(
+      string, replace_order, *, regexps=get_format_standart_regexps, **kwargs):
+    """Return valid datetime.strptime format by given string and order.
 
-    Function use regexps described in 'regexps' dict (as values) to search
-    matches in given 'string'. When it does match anything it will
-    replace match with key of matched regexp.
-    Matching ocurrs by order described in 'replace_order' tuple.
-    'replace_order' tuple must contain keys for 'regexps' dictionary
-    in format "{key}". Like so you describe two things in one time:
-      regular expression to search (it takes from 'regexps' dict by this key);
-      on what to replace (match will be replaced to this key);
-
-    You also can use look ahead/behind assertion for these values to spefify
-    key placement in the 'string'.
-
-    Example:
-    --------
-    # Used default 'get_format_standart_regexps' table
-                                                    # Look behind assertion
-    get_format('2017 04 12 05:30', ('{%Y}', '{%d}', '(?<=:){%M}'))
-    # Will return
-    ('2017 04 12 05:30', '%Y %d 12 05:%M')
-
-    ## Another example
-
-    get_format('13:00 2017 October 12', ('(?<={%B}){%m}', '{%d}', '{%Y}'))
-    # Will return
-                             # \/ This is misstake of your order.
-    ('13:00 2017 October 12', '%d:00 %Y October %m')
-
+    Function iterates over 'replace_order' tuple (which is a tuple of valid
+    keys for 'regexps' dictionary), on each iteration it uses current
+    'replace_order' element to get regular expression from 'regexps' dict, and
+    try to find match in 'string' by given regular expression. If match is
+    found, then whole match will be replaced with a key of regular expression
+    that was used to find match. You can describe one 'replace_order' for few
+    different format types. You also can use look ahead/behind assertion to
+    specify where key supposed to be in the 'string'.
 
     Params:
     -------
     string : str
         String to get format from.
     replace_order : tuple of str
-        A list of formatted strings. Must only contain keys described in
-        'regexps' dictionary.
+        tuple of valid keys for 'regexps' dictionary. Must only contain keys
+        described in 'regexps' dictionary, keys also can be represented as
+        regular expressions.
     regexps : dict
         A dictionary of regular expressions. Contain data in following format:
-            key - regular string;
+            key - simple string;
             value - regular expression;
     """
+    if kwargs:
+        regexps.update(kwargs)
+
     datetime_format = string
+    matched_keys = []
 
-    for element in replace_order:
-        # For order element using look ahead/behind assertion
-        if len(element) > 2:
-            datetime_format = re.sub(
-                element.format(**regexps),
-                # Get key name from regexp with look ahead/behind assertion
-                re.sub(r'\([^)]*\)|{|}', '', element),
-                datetime_format,
-                1
-            )
-        # For strightforward key
+    for regexp_key in replace_order:
+        # If regexp_key is represented as regular expression:
+        if '{' in regexp_key:
+            # Fill format replacement fields ('{%key}') with regexps.
+            regexp = regexp_key.format(**regexps)
+            # Extract key name from regexp
+            # By replacing anything in '()' and symbols '{', '}' to ''.
+            regexp_key = re.sub(r'\([^)]*\)|{|}', '', regexp_key)
         else:
-            datetime_format = re.sub(
-                regexps.get(element), element, datetime_format, 1)
+            # Otherwise 'regexp_key' is a regular key, just get regexp.
+            regexp = regexps.get(regexp_key)
 
-    # Auto complete Keys not described in replace_order
-    for format_sym, regex in regexps.items():
-        datetime_format = re.sub(regex, format_sym, datetime_format, 1)
+        # Don't process keys which are already matched.
+        if regexp_key in matched_keys:
+            continue
 
-    return string, datetime_format
+        datetime_format = re.sub(
+            regexp,  # Find match.
+            regexp_key,  # Replace to key.
+            datetime_format,
+            count=1  # Replace only first match.
+        )
+
+        matched_keys.append(regexp_key)
+
+    return datetime_format
+
+
+def pop_from_str_by_regexp(string, regexp, default=None):
+    match = re.search(regexp, string)
+    if match:
+        match = match.group()
+        return string.replace(match, ''), match
+    else:
+        return string, default
+
+
+def complement_each_other(
+        pieces, fetch_order, regexps=get_format_standart_regexps):
+    dictified_pieces = []
+
+    # Transfer strings to dict
+    for piece in pieces:
+        matched_keys = []
+        current_piece_dict = {}
+        dictified_pieces.append(current_piece_dict)
+
+        for regexp_key in fetch_order:
+            if '{' in regexp_key:
+                # Fill format replacement fields ('{%key}') with regexps.
+                regexp = regexp_key.format(**regexps)
+                # Extract key name from regexp
+                # By replacing anything in '()' and symbols '{', '}' to ''.
+                regexp_key = re.sub(r'\([^)]*\)|{|}', '', regexp_key)
+            else:
+                # Otherwise 'regexp_key' is a regular key, just get regexp.
+                regexp = regexps.get(regexp_key)
+
+            # Don't process keys which are already matched.
+            if regexp_key in matched_keys:
+                continue
+
+            piece, match = pop_from_str_by_regexp(piece, regexp)
+
+            if match:
+                current_piece_dict[regexp_key] = match
+                matched_keys.append(regexp_key)
+
+    for piece_dict in dictified_pieces:
+        for another_piece_dict in dictified_pieces:
+            if piece_dict is not another_piece_dict:
+                for key in another_piece_dict:
+                    if key not in piece_dict:
+                        piece_dict[key] = another_piece_dict[key]
+
+    return tuple(
+            (' '.join(piece_dict.keys()), ' '.join(piece_dict.values()))
+            for piece_dict in dictified_pieces
+        )
 
 
 def get_soup(url, *, method='get', parser='html.parser', **kwargs):
@@ -132,53 +191,13 @@ def get_soup(url, *, method='get', parser='html.parser', **kwargs):
     return BeautifulSoup(page.content, parser)
 
 
-def get_in_select(soup, css_selector, default=None, *attrs_path, limit=1):
-    """Return regular bs4.select_one value or it's attr if attrs_path defined.
-
-    Arguments
-    ---------
-    css_selector : str
-        Css selector for element to match in soup.
-    default : any, optional
-        Value to return in any except cases (no select found, no attr)
-    attrs_path : tuple, optional
-        Regular 'funcy.get_in' path to the value.
-        If is None then regular select_one value returned.
-    limit : int
-        If None - function will return regular 'select' value.
-        See BeautifulSoup docs of 'select' for more.
-    """
-    if limit is 1:
-        select = soup.select_one(css_selector)
-    else:
-        return soup.select(css_selector, limit=limit)
-
-    if select is None:
-        return default
-
-    if attrs_path:
-        # Try to get attr from bs4_tag.attrs dictionalry (for tag.href etc).
-        select_attr = get_in(select, attrs_path)
-        if select_attr is None:
-            # Otherwise return regular attr or default (for tag.text etc).
-            return get_in(select.__dict__, attrs_path, default)
-        else:
-            return select_attr
-
-    return select
-
-
-def date_range_generator(
-        start_date, end_date, *, format_=None, timezone_obj=None):
+def date_range_generator(start_date, end_date, *, format_=None):
     if format_:
         start_date = datetime.strptime(start_date, format_)
         if not end_date:
             end_date = start_date.replace(hour=23, minute=59)
         else:
             end_date = datetime.strptime(end_date, format_)
-    if timezone_obj:
-        start_date = timezone_obj.localize(start_date)
-        end_date = timezone_obj.localize(end_date)
 
     yield start_date
     start_date = start_date.replace(hour=00, minute=00)
@@ -187,7 +206,7 @@ def date_range_generator(
         yield start_date + timedelta(days=day)
 
 
-def fetch_elements_on_page_generator(url, selector):
+def fetch_from_page_generator(url, selector):
     """Yield all elements from site page matched by 'selector' selector."""
     soup = get_soup(url)
 
@@ -195,30 +214,32 @@ def fetch_elements_on_page_generator(url, selector):
         yield element
 
 
-def fetch_elements_on_page_by_url_until_generator(
-        url_template, selector, *, until, state=True, start_page=1):
+def fetch_from_page_until_by_url_generator(
+                               url_template, selector, *, until, start_page=1):
     """Yield all elements from site page matched by 'selector' selector.
 
-    Generator iterates over site pages by 'url_template', yileds all elements
-    matched by 'selector', until element specified by 'until' selector
-    is found (or not found depending on 'state' value).
+    Generator iterates over site pages using 'url_template' (which have to
+    contain 'page' format's replacement field), yileds all elements matched by
+    'selector', until 'until' function returns 'True' (soup of current page
+    passed on every iteration of function).
 
     Parameters
     ----------
     url_template : str
         Template string with format input '{page}' for specifying page.
     selector : str
-        BeautifulSoup selector for link search. All matches will be yielded,
-        so you must spefify selector referring directly to elements you search.
-    until : str
-        BeautifulSoup selector for condition element search. Condition element
-        specifies when to stop iterating over pages.
-    state : bool
-        Specifies trigger for iteration ending.
-        True: iterate until 'until' element is currently found on page,
-        False: iterate until 'until' element is currently not found on page.
+        Selector for bs4 'select' method used for elements search. All matches
+        will be yielded, so you must spefify selector referring directly to
+        elements you want to get.
+    until : function
+        Function which will be called at the end of every page iteration. Soup
+        of current page will be passed as only argumet, return value used to
+        verify continue iteration or not (True - continue, False - stop).
+        Supposed to be used to search some elements on page which will be only
+        either on every page except last, either only on last page to use them
+        as triggers to stop iterating.
     start_page : int
-        Site's start page number.
+        Page number to start iterate from.
     """
     for page in itertools.count(start_page):
         soup = get_soup(url_template.format(page=page))
@@ -226,46 +247,101 @@ def fetch_elements_on_page_by_url_until_generator(
         for element in soup.select(selector):
             yield element
 
-        condition_element = soup.select_one(until)
-        if bool(condition_element) != state:
+        if not until(soup):
             break
 
 
-def update_fields_by_get_in_select(
-        soup, fields, fields_to_update=None, fields_to_ignore=None):
-    """Update sent 'fields' dict with 'get_in_select' function.
+def getattr_in_select(soup, css_selector, attr=None, default=None):
+    '''Return regular bs4.select_one value or attr value if attr defined.
 
-    Dict suppose to contain arguments for 'get_in_select' function
-    (except first), which will be sent to it and replaced with function return
-    value.
-    You can specify which fields to update by use 'fields_to_update' or
-    'fields_to_ignore' parameters.
-    Generaly function will search elements in soup using css selectors,
-    and take attributes from matched elements.
+    Arguments
+    ---------
+    soup : BeautifulSoup
+        Page soup to search elements in.
+    attr : str, optional
+        Attribute to get. If is None then regular select_one value will be
+        returned.
+    default : any, optional
+        Value to return in any except cases (no select found, no attr).
+    '''
+    select = soup.select_one(css_selector)
+
+    if select is None:
+        return default
+
+    if attr:
+        # Try to get attr from bs4_tag.attrs dictionary(for tag.href etc).
+        select_attr = select.get(attr)
+        if select_attr is None:
+            # Otherwise return regular attr or default(for tag.text etc).
+            return getattr(select, attr, default)
+        else:
+            return select_attr
+
+    return select
+
+
+def get_fields_by_select_match(soup, fields):
+    """Return dict of 'getattr_in_select' results by given 'fields' dict.
 
     Params
     ------
     soup : BeautifulSoup
-        BeautifulSoup object, supposed to represend page.
-    fields : dict of tuples
-        Dict to update, with tuple values containing data for 'get_in_select'
-        function. Tuple's data will be unpacked to 'get_in_select' function
-        and replace with returned value.
-        See 'get_in_select' docs for more.
-    fields_to_update : tuple
-        A list of fields to update. If None - all fields will be updated
-        (Except fields listed in fields_to_ignore).
-    fields_to_ignore : tuple
-        A list of fields to ignore. Used when fields_to_update is None to
-        specifie which fields to not update.
+        Page soup to search elements in.
+    fields : dictionary
+        Dictionary where key - name of field, value - tuple of arguments for
+        'getattr_in_select' function.
     """
-    if fields_to_update:
-        for field_name in fields_to_update:
-            fields[field_name] = get_in_select(
-                soup, *fields[field_name])
-    else:
-        for field_name in fields:
-            if fields_to_ignore and field_name in fields_to_ignore:
-                continue
-            fields[field_name] = get_in_select(
-                soup, *fields[field_name])
+    return {
+        field_name: getattr_in_select(soup, *fields[field_name])
+        for field_name in fields
+        }
+
+
+def validate_event_fields(fields, *other_field_names):
+    """Check that 'fields' dict contain all required fields of Event model."""
+    # At least one must exist
+    if not fields.get('address') and fields.get('place_title'):
+        return False
+
+    # Validate fields which are required for 'Event' model.
+    # (fields which can't be null, blank, and have no defaults)
+    for field_name in EVENT_REQUIRED_FIELDS:
+        # Check that field exists and has value,
+        if not fields.get(field_name):
+            return False
+
+    # Validate your castom fields.
+    for field_name in other_field_names:
+        if not fields.get(field_name):
+            return False
+
+    return True
+
+
+def dump_to_db(
+        fields, language=settings.DEFAULT_LANGUAGE, dates=None, timezone=None):
+    if timezone:
+        fields['start_time'] = timezone.localize(fields['start_time'])
+        fields['end_time'] = timezone.localize(fields['end_time'])
+
+    if not dates:
+        dates = date_range_generator(fields['start_time'], fields['end_time'])
+
+    categories = fields.pop('categories')
+    with translation.override(language):
+        for date_and_time in dates:
+            event_obj, created = Event.objects.update_or_create(
+                origin_url=fields['origin_url'],
+                start_time=date_and_time,
+                end_time=fields.pop(
+                    'end_time',
+                    # Otherwise use default:
+                    date_and_time.replace(hour=23, minute=59)),
+                defaults=fields,
+            )
+
+            if created and categories:
+                for category in categories:
+                    event_obj.categories.add(
+                        EventCategory.objects.get_or_create(title=category)[0])
