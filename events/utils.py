@@ -178,42 +178,6 @@ def get_soup(url, *, method='get', parser='html.parser', **kwargs):
     return BeautifulSoup(page.content, parser)
 
 
-def get_in_select(soup, css_selector, default=None, *attrs_path, limit=1):
-    """Return regular bs4.select_one value or it's attr if attrs_path defined.
-
-    Arguments
-    ---------
-    css_selector : str
-        Css selector for element to match in soup.
-    default : any, optional
-        Value to return in any except cases (no select found, no attr)
-    attrs_path : tuple, optional
-        Regular 'funcy.get_in' path to the value.
-        If is None then regular select_one value returned.
-    limit : int
-        If None - function will return regular 'select' value.
-        See BeautifulSoup docs of 'select' for more.
-    """
-    if limit is 1:
-        select = soup.select_one(css_selector)
-    else:
-        return soup.select(css_selector, limit=limit)
-
-    if select is None:
-        return default
-
-    if attrs_path:
-        # Try to get attr from bs4_tag.attrs dictionalry (for tag.href etc).
-        select_attr = get_in(select, attrs_path)
-        if select_attr is None:
-            # Otherwise return regular attr or default (for tag.text etc).
-            return get_in(select.__dict__, attrs_path, default)
-        else:
-            return select_attr
-
-    return select
-
-
 def date_range_generator(
         start_date, end_date, *, format_=None, timezone_obj=None):
     if format_:
@@ -277,41 +241,63 @@ def fetch_elements_on_page_by_url_until_generator(
             break
 
 
-def update_fields_by_get_in_select(
-        soup, fields, fields_to_update=None, fields_to_ignore=None):
-    """Update sent 'fields' dict with 'get_in_select' function.
+def getattr_in_select(soup, css_selector, attr=None, default=None, limit=1):
+    '''Return regular bs4.select_one value or attr value if attr defined.
 
-    Dict suppose to contain arguments for 'get_in_select' function
-    (except first), which will be sent to it and replaced with function return
-    value.
-    You can specify which fields to update by use 'fields_to_update' or
-    'fields_to_ignore' parameters.
-    Generaly function will search elements in soup using css selectors,
-    and take attributes from matched elements.
+    Arguments
+    ---------
+    attr : str, optional
+        Attribute to get. If is None then regular select_one value returned.
+    default : any, optional
+        Value to return in any except cases (no select found, no attr)
+    '''
+    if limit is 1:
+        select = soup.select_one(css_selector)
+    else:
+        return soup.select(css_selector, limit=limit)
+
+    if select is None:
+        return default
+
+    if attr:
+        # Try to get attr from bs4_tag.attrs dictionalry(for tag.href etc).
+        select_attr = select.get(attr)
+        if select_attr is None:
+            # Otherwise return regular attr or default(for tag.text etc).
+            return getattr(select, attr, default)
+        else:
+            return select_attr
+
+    return select
+
+
+def update_fields_by_select_match(
+        soup, fields, fields_to_update=None, fields_to_ignore=None):
+    """Update sent 'fields' dict with data matched on page using bs4 selectors.
 
     Params
     ------
-    soup : BeautifulSoup
-        BeautifulSoup object, supposed to represend page.
-    fields : dict of tuples
-        Dict to update, with tuple values containing data for 'get_in_select'
-        function. Tuple's data will be unpacked to 'get_in_select' function
-        and replace with returned value.
-        See 'get_in_select' docs for more.
+    fields : dict
+        Dict of fields to update, with tuple values containing following data:
+            first : css string selector referring directly to element.
+            second(optional) : attribute to get from selected object.
+            default(optional) : default value to set if selector returned None
+                or attribute does not exist.
     fields_to_update : tuple
         A list of fields to update. If None - all fields will be updated
-        (Except fields listed in fields_to_ignore).
+            (Except fields listed in fields_to_ignore).
     fields_to_ignore : tuple
         A list of fields to ignore. Used when fields_to_update is None to
-        specifie which fields to not update.
+            specifie which fields to not update.
     """
+
     if fields_to_update:
         for field_name in fields_to_update:
-            fields[field_name] = get_in_select(
+            fields[field_name] = getattr_in_select(
                 soup, *fields[field_name])
     else:
         for field_name in fields:
             if fields_to_ignore and field_name in fields_to_ignore:
                 continue
-            fields[field_name] = get_in_select(
+            fields[field_name] = getattr_in_select(
                 soup, *fields[field_name])
