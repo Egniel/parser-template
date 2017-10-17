@@ -175,7 +175,7 @@ def complement_each_other(
                         piece_dict[key] = another_piece_dict[key]
 
     return tuple(
-            (' '.join(piece_dict.keys()), ' '.join(piece_dict.values()))
+            (' '.join(piece_dict.values()), ' '.join(piece_dict.keys()))
             for piece_dict in dictified_pieces
         )
 
