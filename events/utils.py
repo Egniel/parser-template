@@ -298,7 +298,7 @@ def get_fields_by_select_match(soup, fields):
         }
 
 
-def validate_event_fields(fields, *other_field_names):
+def validate_event_fields(fields, ignore=None, *other_field_names):
     """Check that 'fields' dict contain all required fields of Event model."""
     # At least one must exist
     if not fields.get('address') and fields.get('place_title'):
@@ -308,7 +308,7 @@ def validate_event_fields(fields, *other_field_names):
     # (fields which can't be null, blank, and have no defaults)
     for field_name in EVENT_REQUIRED_FIELDS:
         # Check that field exists and has value,
-        if not fields.get(field_name):
+        if field_name not in ignore and not fields.get(field_name):
             return False
 
     # Validate your castom fields.
@@ -322,8 +322,11 @@ def validate_event_fields(fields, *other_field_names):
 def dump_to_db(
         fields, language=settings.DEFAULT_LANGUAGE, dates=None, timezone=None):
     if timezone:
-        fields['start_time'] = timezone.localize(fields['start_time'])
-        fields['end_time'] = timezone.localize(fields['end_time'])
+        if dates:
+            dates = tuple(timezone.localize(date) for date in dates)
+        else:
+            fields['start_time'] = timezone.localize(fields['start_time'])
+            fields['end_time'] = timezone.localize(fields['end_time'])
 
     if not dates:
         dates = date_range_generator(fields['start_time'], fields['end_time'])
