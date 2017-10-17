@@ -2,6 +2,8 @@ from datetime import datetime
 from datetime import timedelta
 import re
 import itertools
+import calendar
+import locale
 
 import requests
 from django.conf import settings
@@ -11,6 +13,8 @@ from django.db.models.fields import NOT_PROVIDED
 
 from events.models import Event
 from events.models import EventCategory
+
+INITIAL_LOCALE = locale.getlocale()[0]
 
 EVENT_REQUIRED_FIELDS = tuple(
     field.name
@@ -27,23 +31,35 @@ class ResponseIsNot200Error(Exception):
         super().__init__(*args, **kwargs)
 
 
-get_format_standart_regexps = {
-    '%a': r'(?P<weekday_short>Mon|Tue|Wed|Thu|Fri|Sat|Sun)',
-    '%A': (r'(?P<weekday>Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sun'
-           'day)'),
+def get_locale_depending_format_regexps(locale_=locale.getlocale()):
+    if locale_ is not INITIAL_LOCALE:
+        locale.setlocale(locale.LC_ALL, locale_)
+    locale_depending_format_regexps = {
+        '%a': '|'.join(calendar.day_abbr),
+        '%A': '|'.join(calendar.day_name),
+        '%b': '|'.join(calendar.month_abbr[1:]),
+        '%B': '|'.join(calendar.month_name[1:]),
+    }
+    locale.setlocale(locale.LC_ALL, INITIAL_LOCALE)
+
+    return locale_depending_format_regexps
+
+def update_get_format_standart_regexps():  # noqa
+    if locale.getlocale()[0] is not INITIAL_LOCALE:
+        get_format_standart_regexps.update(
+            get_locale_depending_format_regexps())
+
+get_format_standart_regexps = {  # noqa
     '%w': r'(?P<weekday_digit>[0-6])',
-    '%d': r'(?P<day>\d\d?)',
-    '%b': r'(?P<month_short>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)',
-    '%B': (r'(?P<month>January|February|March|April|May|June|July|August|Septe'
-           'mber|October|November|December)'),
-    '%m': r'(?P<month_digit>\d\d)',
+    '%d': r'(?P<day>[0-3]?\d)',
+    '%m': r'(?P<month_digit>1[0-2]|0?\d)',
     '%y': r'(?P<year_short>\d\d)',
     '%Y': r'(?P<year>\d\d\d\d)',
-    '%H': r'(?P<hour>\d\d?)',
-    '%I': r'(?P<hour_short>\d\d?)',
-    '%p': r'(?P<period>AM|PM|am|pm)',
-    '%M': r'(?P<minute>\d\d)',
-    '%S': r'(?P<second>\d\d)',
+    '%H': r'(?P<hour>[0-5]?\d)',
+    '%I': r'(?P<hour_short>1[0-2]|0?\d)',
+    '%p': r'(?P<period>[aA][mM]|[pP][mM])',
+    '%M': r'(?P<minute>[0-5]?\d)',
+    '%S': r'(?P<second>[0-5]?\d)',
     '%f': r'(?P<microsecond>\d\d\d\d\d\d)',
     '%z': r'(?P<UTC>[+-]\d\d\d\d)',
     '%Z': r'(?P<time_zone>UTC|EST|CST)',
@@ -52,8 +68,9 @@ get_format_standart_regexps = {
     '%W': r'(?P<day_of_year_monday>\d\d)',
     # '%c': r'(?P<full_date>Tue Aug 16 21:30:00 1988)',
     '%x': r'(?P<date>\d\d[/.-]\d\d[/.-]\d\d)',
-    '%X': r'(?P<time>\d\d:\d\d:\d\d)',
+    '%X': r'(?P<time>[0-5]?\d:[0-5]?\d:[0-5]?\d)',
 }
+update_get_format_standart_regexps()
 
 
 def add_root(url):
@@ -95,6 +112,8 @@ def get_format(
     """
     if kwargs:
         regexps.update(kwargs)
+
+    update_get_format_standart_regexps()
 
     datetime_format = string
     matched_keys = []
@@ -138,6 +157,8 @@ def pop_from_str_by_regexp(string, regexp, default=None):
 
 def complement_each_other(
         pieces, fetch_order, regexps=get_format_standart_regexps):
+    update_get_format_standart_regexps()
+
     dictified_pieces = []
 
     # Transfer strings to dict
