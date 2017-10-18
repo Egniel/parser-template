@@ -2,6 +2,9 @@ from datetime import datetime
 from datetime import timedelta
 import re
 import itertools
+import calendar
+import locale
+from contextlib import contextmanager
 
 import requests
 from django.conf import settings
@@ -21,29 +24,56 @@ EVENT_REQUIRED_FIELDS = tuple(
         )
 )
 
+last_get_format_language = None
+
 
 class ResponseIsNot200Error(Exception):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 
-get_format_standart_regexps = {
-    '%a': r'(?P<weekday_short>Mon|Tue|Wed|Thu|Fri|Sat|Sun)',
-    '%A': (r'(?P<weekday>Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sun'
-           'day)'),
+@contextmanager
+def set_locale(locale_):
+    initial_locale = '.'.join(locale.getlocale())
+    locale_ = locale.normalize(locale_ + '.utf8')
+    yield locale.setlocale(locale.LC_ALL, locale_)
+    locale.setlocale(locale.LC_ALL, initial_locale)
+
+
+# TODO move everything relative to 'get_format' in one class
+def get_locale_depending_format_regexps(locale_=None):
+    if locale_ is None:
+        locale_ = '.'.join(locale.getlocale())
+
+    with set_locale(locale_):
+        locale_depending_format_regexps = {
+            '%a': '|'.join(calendar.day_abbr),
+            '%A': '|'.join(calendar.day_name),
+            '%b': '|'.join(calendar.month_abbr[1:]),
+            '%B': '|'.join(calendar.month_name[1:]),
+        }
+
+    return locale_depending_format_regexps
+
+def update_get_format_standart_regexps(language=settings.DEFAULT_LANGUAGE): # noqa
+    global last_get_format_language
+    if language is not last_get_format_language:
+        get_format_standart_regexps.update(
+            get_locale_depending_format_regexps(language)
+            )
+        last_get_format_language = language
+
+get_format_standart_regexps = {  # noqa
     '%w': r'(?P<weekday_digit>[0-6])',
-    '%d': r'(?P<day>\d\d?)',
-    '%b': r'(?P<month_short>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)',
-    '%B': (r'(?P<month>January|February|March|April|May|June|July|August|Septe'
-           'mber|October|November|December)'),
-    '%m': r'(?P<month_digit>\d\d)',
+    '%d': r'(?P<day>[0-3]?\d)',
+    '%m': r'(?P<month_digit>1[0-2]|0?\d)',
     '%y': r'(?P<year_short>\d\d)',
     '%Y': r'(?P<year>\d\d\d\d)',
-    '%H': r'(?P<hour>\d\d?)',
-    '%I': r'(?P<hour_short>\d\d?)',
-    '%p': r'(?P<period>AM|PM|am|pm)',
-    '%M': r'(?P<minute>\d\d)',
-    '%S': r'(?P<second>\d\d)',
+    '%H': r'(?P<hour>[0-5]?\d)',
+    '%I': r'(?P<hour_short>1[0-2]|0?\d)',
+    '%p': r'(?P<period>[aA][mM]|[pP][mM])',
+    '%M': r'(?P<minute>[0-5]?\d)',
+    '%S': r'(?P<second>[0-5]?\d)',
     '%f': r'(?P<microsecond>\d\d\d\d\d\d)',
     '%z': r'(?P<UTC>[+-]\d\d\d\d)',
     '%Z': r'(?P<time_zone>UTC|EST|CST)',
@@ -52,8 +82,9 @@ get_format_standart_regexps = {
     '%W': r'(?P<day_of_year_monday>\d\d)',
     # '%c': r'(?P<full_date>Tue Aug 16 21:30:00 1988)',
     '%x': r'(?P<date>\d\d[/.-]\d\d[/.-]\d\d)',
-    '%X': r'(?P<time>\d\d:\d\d:\d\d)',
+    '%X': r'(?P<time>[0-5]?\d:[0-5]?\d:[0-5]?\d)',
 }
+update_get_format_standart_regexps()
 
 
 def add_root(url):
@@ -191,19 +222,19 @@ def get_soup(url, *, method='get', parser='html.parser', **kwargs):
     return BeautifulSoup(page.content, parser)
 
 
-def date_range_generator(start_date, end_date, *, format_=None):
-    if format_:
-        start_date = datetime.strptime(start_date, format_)
-        if not end_date:
-            end_date = start_date.replace(hour=23, minute=59)
-        else:
-            end_date = datetime.strptime(end_date, format_)
+def date_range_generator(start_date, end_date):
+    if start_date.date() == end_date.date():
+        yield start_date, end_date
+        return
 
-    yield start_date
-    start_date = start_date.replace(hour=00, minute=00)
+    yield start_date, start_date.replace(hour=23, minute=59)
 
-    for day in range((end_date - start_date).days):
-        yield start_date + timedelta(days=day)
+    date_between = start_date.replace(hour=00, minute=00)
+    for day in range((end_date.date() - start_date.date()).days - 1):
+        date_between = date_between + timedelta(days=day)
+        yield (date_between, date_between.replace(hour=23, minute=59))
+
+    yield end_date.replace(hour=00, minute=00), end_date
 
 
 def fetch_from_page_generator(url, selector):
@@ -298,7 +329,7 @@ def get_fields_by_select_match(soup, fields):
         }
 
 
-def validate_event_fields(fields, ignore=None, *other_field_names):
+def validate_event_fields(fields, ignore=(), *other_field_names):
     """Check that 'fields' dict contain all required fields of Event model."""
     # At least one must exist
     if not fields.get('address') and fields.get('place_title'):
@@ -329,18 +360,16 @@ def dump_to_db(
             fields['end_time'] = timezone.localize(fields['end_time'])
 
     if not dates:
-        dates = date_range_generator(fields['start_time'], fields['end_time'])
+        dates = date_range_generator(fields.pop('start_time'),
+                                     fields.pop('end_time'))
 
     categories = fields.pop('categories')
     with translation.override(language):
-        for date_and_time in dates:
+        for start_time, end_time in dates:
             event_obj, created = Event.objects.update_or_create(
                 origin_url=fields['origin_url'],
-                start_time=date_and_time,
-                end_time=fields.pop(
-                    'end_time',
-                    # Otherwise use default:
-                    date_and_time.replace(hour=23, minute=59)),
+                start_time=start_time,
+                end_time=end_time,
                 defaults=fields,
             )
 
