@@ -222,19 +222,19 @@ def get_soup(url, *, method='get', parser='html.parser', **kwargs):
     return BeautifulSoup(page.content, parser)
 
 
-def date_range_generator(start_date, end_date, *, format_=None):
-    if format_:
-        start_date = datetime.strptime(start_date, format_)
-        if not end_date:
-            end_date = start_date.replace(hour=23, minute=59)
-        else:
-            end_date = datetime.strptime(end_date, format_)
+def date_range_generator(start_date, end_date):
+    if start_date.date() == end_date.date():
+        yield start_date, end_date
+        return
 
-    yield start_date
-    start_date = start_date.replace(hour=00, minute=00)
+    yield start_date, start_date.replace(hour=23, minute=59)
 
-    for day in range((end_date - start_date).days):
-        yield start_date + timedelta(days=day)
+    date_between = start_date.replace(hour=00, minute=00)
+    for day in range((end_date.date() - start_date.date()).days - 1):
+        date_between = date_between + timedelta(days=day)
+        yield (date_between, date_between.replace(hour=23, minute=59))
+
+    yield end_date.replace(hour=00, minute=00), end_date
 
 
 def fetch_from_page_generator(url, selector):
@@ -360,18 +360,16 @@ def dump_to_db(
             fields['end_time'] = timezone.localize(fields['end_time'])
 
     if not dates:
-        dates = date_range_generator(fields['start_time'], fields['end_time'])
+        dates = date_range_generator(fields.pop('start_time'),
+                                     fields.pop('end_time'))
 
     categories = fields.pop('categories')
     with translation.override(language):
-        for date_and_time in dates:
+        for start_time, end_time in dates:
             event_obj, created = Event.objects.update_or_create(
                 origin_url=fields['origin_url'],
-                start_time=date_and_time,
-                end_time=fields.pop(
-                    'end_time',
-                    # Otherwise use default:
-                    date_and_time.replace(hour=23, minute=59)),
+                start_time=start_time,
+                end_time=end_time,
                 defaults=fields,
             )
 
