@@ -359,7 +359,15 @@ def dump_to_db(
             fields['start_time'] = timezone.localize(fields['start_time'])
             fields['end_time'] = timezone.localize(fields['end_time'])
 
-    if not dates:
+    if dates:
+        # If given 'dates' is a list of simgle dates
+        # (not of tuples of start and end time)
+        if dates and not hasattr(dates[0], '__iter__'):
+            dates = tuple(
+                (start_date, start_date.replace(hour=23, minute=59))
+                for start_date in dates
+                )
+    else:
         dates = date_range_generator(fields.pop('start_time'),
                                      fields.pop('end_time'))
 
