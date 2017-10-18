@@ -4,6 +4,7 @@ import re
 import itertools
 import calendar
 import locale
+from contextlib import contextmanager
 
 import requests
 from django.conf import settings
@@ -14,8 +15,6 @@ from django.db.models.fields import NOT_PROVIDED
 from events.models import Event
 from events.models import EventCategory
 
-INITIAL_LOCALE = locale.getlocale()[0]
-
 EVENT_REQUIRED_FIELDS = tuple(
     field.name
     for field in Event._meta.fields if (
@@ -25,29 +24,44 @@ EVENT_REQUIRED_FIELDS = tuple(
         )
 )
 
+last_get_format_language = None
+
 
 class ResponseIsNot200Error(Exception):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 
-def get_locale_depending_format_regexps(locale_=locale.getlocale()):
-    if locale_ is not INITIAL_LOCALE:
-        locale.setlocale(locale.LC_ALL, locale_)
-    locale_depending_format_regexps = {
-        '%a': '|'.join(calendar.day_abbr),
-        '%A': '|'.join(calendar.day_name),
-        '%b': '|'.join(calendar.month_abbr[1:]),
-        '%B': '|'.join(calendar.month_name[1:]),
-    }
-    locale.setlocale(locale.LC_ALL, INITIAL_LOCALE)
+@contextmanager
+def set_locale(locale_):
+    initial_locale = '.'.join(locale.getlocale())
+    locale_ = locale.normalize(locale_ + '.utf8')
+    yield locale.setlocale(locale.LC_ALL, locale_)
+    locale.setlocale(locale.LC_ALL, initial_locale)
+
+
+# TODO move everything relative to 'get_format' in one class
+def get_locale_depending_format_regexps(locale_=None):
+    if locale_ is None:
+        locale_ = '.'.join(locale.getlocale())
+
+    with set_locale(locale_):
+        locale_depending_format_regexps = {
+            '%a': '|'.join(calendar.day_abbr),
+            '%A': '|'.join(calendar.day_name),
+            '%b': '|'.join(calendar.month_abbr[1:]),
+            '%B': '|'.join(calendar.month_name[1:]),
+        }
 
     return locale_depending_format_regexps
 
-def update_get_format_standart_regexps():  # noqa
-    if locale.getlocale()[0] is not INITIAL_LOCALE:
+def update_get_format_standart_regexps(language=settings.DEFAULT_LANGUAGE): # noqa
+    global last_get_format_language
+    if language is not last_get_format_language:
         get_format_standart_regexps.update(
-            get_locale_depending_format_regexps())
+            get_locale_depending_format_regexps(language)
+            )
+        last_get_format_language = language
 
 get_format_standart_regexps = {  # noqa
     '%w': r'(?P<weekday_digit>[0-6])',
@@ -113,8 +127,6 @@ def get_format(
     if kwargs:
         regexps.update(kwargs)
 
-    update_get_format_standart_regexps()
-
     datetime_format = string
     matched_keys = []
 
@@ -157,8 +169,6 @@ def pop_from_str_by_regexp(string, regexp, default=None):
 
 def complement_each_other(
         pieces, fetch_order, regexps=get_format_standart_regexps):
-    update_get_format_standart_regexps()
-
     dictified_pieces = []
 
     # Transfer strings to dict
@@ -319,7 +329,7 @@ def get_fields_by_select_match(soup, fields):
         }
 
 
-def validate_event_fields(fields, ignore=None, *other_field_names):
+def validate_event_fields(fields, ignore=(), *other_field_names):
     """Check that 'fields' dict contain all required fields of Event model."""
     # At least one must exist
     if not fields.get('address') and fields.get('place_title'):
