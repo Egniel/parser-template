@@ -176,7 +176,7 @@ def pop_from_str_by_regexp(string, regexp, default=None):
     match = re.search(regexp, string)
     if match:
         match = match.group()
-        return string.replace(match, ''), match
+        return re.sub(regexp, '', string), match
     else:
         return string, default
 
@@ -346,7 +346,7 @@ def get_fields_by_select_match(soup, fields):
 def validate_event_fields(fields, ignore=(), *other_field_names):
     """Check that 'fields' dict contain all required fields of Event model."""
     # At least one must exist
-    if not fields.get('address') and fields.get('place_title'):
+    if not fields.get('address') and not fields.get('place_title'):
         return False
 
     # Validate fields which are required for 'Event' model.
