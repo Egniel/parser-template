@@ -127,7 +127,7 @@ def get_format(
     if kwargs:
         regexps.update(kwargs)
 
-    datetime_format = string
+    datetime_format = string.lower()
     matched_keys = []
 
     for regexp_key in replace_order:
@@ -371,7 +371,7 @@ def dump_to_db(
         dates = date_range_generator(fields.pop('start_time'),
                                      fields.pop('end_time'))
 
-    categories = fields.pop('categories')
+    categories = fields.pop('categories', None)
     with translation.override(language):
         for start_time, end_time in dates:
             event_obj, created = Event.objects.update_or_create(
