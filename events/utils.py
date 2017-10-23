@@ -230,11 +230,11 @@ def date_range_generator(start_date, end_date):
     yield start_date, start_date.replace(hour=23, minute=59)
 
     start_date = start_date.replace(hour=00, minute=00)
-    for day in range(1, (end_date.date() - start_date.date()).days - 1):
+    for day in range(1, (end_date.date() - start_date.date()).days):
         date_between = start_date + timedelta(days=day)
         yield (date_between, date_between.replace(hour=23, minute=59))
 
-    yield start_date, end_date
+    yield end_date.replace(hour=00, minute=00), end_date
 
 
 def fetch_from_page_generator(url, selector):
