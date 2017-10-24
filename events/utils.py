@@ -47,10 +47,10 @@ def get_locale_depending_format_regexps(locale_=None):
 
     with set_locale(locale_):
         locale_depending_format_regexps = {
-            '%a': '|'.join(calendar.day_abbr),
-            '%A': '|'.join(calendar.day_name),
-            '%b': '|'.join(calendar.month_abbr[1:]),
-            '%B': '|'.join(calendar.month_name[1:]),
+            '%a': '|'.join(calendar.day_abbr).lower(),
+            '%A': '|'.join(calendar.day_name).lower(),
+            '%b': '|'.join(calendar.month_abbr[1:]).lower(),
+            '%B': '|'.join(calendar.month_name[1:]).lower(),
         }
 
     return locale_depending_format_regexps
