@@ -65,15 +65,15 @@ def update_get_format_standart_regexps(language=settings.DEFAULT_LANGUAGE): # no
 
 get_format_standart_regexps = {  # noqa
     '%w': r'(?P<weekday_digit>[0-6])',
-    '%d': r'(?P<day>[0-3]?\d)',
-    '%m': r'(?P<month_digit>1[0-2]|0?\d)',
+    '%d': r'(?P<day>\d?\d)',
+    '%m': r'(?P<month_digit>\d?\d)',
     '%y': r'(?P<year_short>\d\d)',
     '%Y': r'(?P<year>\d\d\d\d)',
-    '%H': r'(?P<hour>[0-5]?\d)',
-    '%I': r'(?P<hour_short>1[0-2]|0?\d)',
+    '%H': r'(?P<hour>\d?\d)',
+    '%I': r'(?P<hour_short>\d?\d)',
     '%p': r'(?P<period>[aA][mM]|[pP][mM])',
-    '%M': r'(?P<minute>[0-5]?\d)',
-    '%S': r'(?P<second>[0-5]?\d)',
+    '%M': r'(?P<minute>\d?\d)',
+    '%S': r'(?P<second>\d?\d)',
     '%f': r'(?P<microsecond>\d\d\d\d\d\d)',
     '%z': r'(?P<UTC>[+-]\d\d\d\d)',
     '%Z': r'(?P<time_zone>UTC|EST|CST)',
@@ -82,20 +82,9 @@ get_format_standart_regexps = {  # noqa
     '%W': r'(?P<day_of_year_monday>\d\d)',
     # '%c': r'(?P<full_date>Tue Aug 16 21:30:00 1988)',
     '%x': r'(?P<date>\d\d[/.-]\d\d[/.-]\d\d)',
-    '%X': r'(?P<time>[0-5]?\d:[0-5]?\d:[0-5]?\d)',
+    '%X': r'(?P<time>\d?\d:\d?\d:\d?\d)',
 }
 update_get_format_standart_regexps()
-
-
-def add_root(url):
-    if not url:
-        return None
-    if '://' not in url:
-        if url[0] is not '/':
-            url = '/' + url
-        return settings.ROOT_URL + url
-    else:
-        return url
 
 
 def get_format(
@@ -159,10 +148,11 @@ def get_format(
 
 
 def pop_from_str_by_regexp(string, regexp, default=None):
+    """Pop given first found match from strong."""
     match = re.search(regexp, string)
     if match:
         match = match.group()
-        return re.sub(regexp, '', string), match
+        return re.sub(regexp, '', string, 1), match
     else:
         return string, default
 
@@ -209,6 +199,17 @@ def complement_each_other(
             (' '.join(piece_dict.values()), ' '.join(piece_dict.keys()))
             for piece_dict in dictified_pieces
         )
+
+
+def add_root(url):
+    if not url:
+        return None
+    if '://' not in url:
+        if url[0] is not '/':
+            url = '/' + url
+        return settings.ROOT_URL + url
+    else:
+        return url
 
 
 def get_soup(url, *, method='get', parser='html.parser', **kwargs):
