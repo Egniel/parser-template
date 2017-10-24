@@ -141,7 +141,7 @@ def get_format(
     if kwargs:
         regexps.update(kwargs)
 
-    datetime_format = string
+    datetime_format = string.lower()
     matched_keys = []
 
     for regexp_key in replace_order:
@@ -243,9 +243,9 @@ def date_range_generator(start_date, end_date):
 
     yield start_date, start_date.replace(hour=23, minute=59)
 
-    date_between = start_date.replace(hour=00, minute=00)
-    for day in range((end_date.date() - start_date.date()).days - 1):
-        date_between = date_between + timedelta(days=day)
+    start_date = start_date.replace(hour=00, minute=00)
+    for day in range(1, (end_date.date() - start_date.date()).days):
+        date_between = start_date + timedelta(days=day)
         yield (date_between, date_between.replace(hour=23, minute=59))
 
     yield end_date.replace(hour=00, minute=00), end_date
@@ -385,7 +385,7 @@ def dump_to_db(
         dates = date_range_generator(fields.pop('start_time'),
                                      fields.pop('end_time'))
 
-    categories = fields.pop('categories')
+    categories = fields.pop('categories', None)
     with translation.override(language):
         for start_time, end_time in dates:
             event_obj, created = Event.objects.update_or_create(
