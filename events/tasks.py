@@ -20,9 +20,63 @@ from events.models import EventCategory
 from {{ project_name }}.celery import app
 
 
+EVENT_REQUIRED_FIELDS = tuple(
+    field.name
+    for field in Event._meta.fields if (
+        field.blank is False and
+        field.null is False and
+        field.default is NOT_PROVIDED
+        )
+)
+
+
 curr_timezone = timezone.get_default_timezone()
 
 logger = logging.getLogger('{{ project_name }}')
+
+
+def validate_event_fields(fields, ignore=(), *other_field_names):
+    """Check that 'fields' dict contain all required fields of Event model."""
+    # At least one must exist
+    if not fields.get('address') and not fields.get('place_title'):
+        return False
+
+    # Validate fields which are required for 'Event' model.
+    # (fields which can't be null, blank, and have no defaults)
+    for field_name in EVENT_REQUIRED_FIELDS:
+        # Check that field exists and has value,
+        if field_name not in ignore and not fields.get(field_name):
+            return False
+
+    # Validate your castom fields.
+    for field_name in other_field_names:
+        if not fields.get(field_name):
+            return False
+
+    return True
+
+
+# Not tested, care. TODO Delete comment.
+def dump_to_db(fields, , dates=None):
+    if not dates:
+        dates = utils.datetime_range_generator(fields.pop('start_time'),
+                                               fields.pop('end_time'),
+                                               hour=0, minute=0)
+
+    categories = fields.pop('categories', None)
+    with translation.override(settings.DEFAULT_LANGUAGE):
+        for start_time in dates:
+            event_obj, created = Event.objects.update_or_create(
+                origin_url=fields['origin_url'],
+                start_time=start_time,
+                end_time=start_time.replace(hour=23, minute=59),
+                defaults=fields,
+            )
+
+            if created and categories:
+                for category in categories:
+                    event_obj.categories.add(
+                        EventCategory.objects.get_or_create(title=category)[0])
 
 
 @app.task()

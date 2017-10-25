@@ -10,21 +10,9 @@ from contextlib import contextmanager
 import requests
 from django.conf import settings
 from bs4 import BeautifulSoup
-from django.utils import translation
 from django.db.models.fields import NOT_PROVIDED
 
 from events.models import Event
-from events.models import EventCategory
-
-EVENT_REQUIRED_FIELDS = tuple(
-    field.name
-    for field in Event._meta.fields if (
-        field.blank is False and
-        field.null is False and
-        field.default is NOT_PROVIDED
-        )
-)
-
 
 REQUIRED_DIRECTIVES = (
     ('%Y', '%y'),
@@ -493,27 +481,6 @@ def get_soup(url, *, method='get', parser='html.parser', **kwargs):
     return BeautifulSoup(page.content, parser)
 
 
-def date_range_generator(start_date, end_date):
-    """Yield all dates between two enclude edges."""
-    for day in range((end_date - start_date).days + 1):
-        yield start_date + timedelta(days=day)
-
-
-def datetime_range_generator(start_date, end_date, **time_kwargs):
-    """Yield all 'datetime's between two dates enclude edges."""
-    yield start_date
-
-    if time_kwargs:
-        date_between = datetime.combine(start_date.date(), time(**time_kwargs))
-    else:
-        date_between = start_date
-
-    for day in range(1, (end_date.date() - start_date.date()).days):
-        yield date_between + timedelta(days=day)
-
-    yield end_date
-
-
 def fetch_from_page_generator(url, selector):
     """Yield all elements from site page matched by 'selector' selector."""
     soup = get_soup(url)
@@ -589,76 +556,11 @@ def getattr_in_select(soup, css_selector, attr=None, default=None):
     return select
 
 
-def get_fields_by_select_match(soup, fields):
-    """Return dict of 'getattr_in_select' results by given 'fields' dict.
-
-    Params
-    ------
-    soup : BeautifulSoup
-        Page soup to search elements in.
-    fields : dictionary
-        Dictionary where key - name of field, value - tuple of arguments for
-        'getattr_in_select' function.
+def render_dict_by_func(func, args_before=(), args_after=(), *, render_dict):
+    """
+    Apply 'func' to 'render_dict' values. Return dict of rendered values.
     """
     return {
-        field_name: getattr_in_select(soup, *fields[field_name])
-        for field_name in fields
+        field_name: func(*args_before, *render_dict[field_name], *args_after)
+        for field_name in render_dict
         }
-
-
-def validate_event_fields(fields, ignore=(), *other_field_names):
-    """Check that 'fields' dict contain all required fields of Event model."""
-    # At least one must exist
-    if not fields.get('address') and not fields.get('place_title'):
-        return False
-
-    # Validate fields which are required for 'Event' model.
-    # (fields which can't be null, blank, and have no defaults)
-    for field_name in EVENT_REQUIRED_FIELDS:
-        # Check that field exists and has value,
-        if field_name not in ignore and not fields.get(field_name):
-            return False
-
-    # Validate your castom fields.
-    for field_name in other_field_names:
-        if not fields.get(field_name):
-            return False
-
-    return True
-
-
-def dump_to_db(
-        fields, language=settings.DEFAULT_LANGUAGE, dates=None, timezone=None):
-    if timezone:
-        if dates:
-            dates = tuple(timezone.localize(date) for date in dates)
-        else:
-            fields['start_time'] = timezone.localize(fields['start_time'])
-            fields['end_time'] = timezone.localize(fields['end_time'])
-
-    if dates:
-        # If given 'dates' is a list of simgle dates
-        # (not of tuples of start and end time)
-        if dates and not hasattr(dates[0], '__iter__'):
-            dates = tuple(
-                (start_date, start_date.replace(hour=23, minute=59))
-                for start_date in dates
-                )
-    else:
-        dates = date_range_generator(fields.pop('start_time'),
-                                     fields.pop('end_time'))
-
-    categories = fields.pop('categories', None)
-    with translation.override(language):
-        for start_time, end_time in dates:
-            event_obj, created = Event.objects.update_or_create(
-                origin_url=fields['origin_url'],
-                start_time=start_time,
-                end_time=end_time,
-                defaults=fields,
-            )
-
-            if created and categories:
-                for category in categories:
-                    event_obj.categories.add(
-                        EventCategory.objects.get_or_create(title=category)[0])
