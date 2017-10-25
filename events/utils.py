@@ -55,7 +55,10 @@ def get_locale_depending_format_regexps(locale_=None):
 
     return locale_depending_format_regexps
 
-def update_get_format_standart_regexps(language=settings.DEFAULT_LANGUAGE): # noqa
+def update_get_format_standart_regexps(language=None): # noqa
+    if language is None:
+        language = locale.getlocale()[0]
+
     global last_get_format_language
     if language is not last_get_format_language:
         get_format_standart_regexps.update(
@@ -65,15 +68,15 @@ def update_get_format_standart_regexps(language=settings.DEFAULT_LANGUAGE): # no
 
 get_format_standart_regexps = {  # noqa
     '%w': r'(?P<weekday_digit>[0-6])',
-    '%d': r'(?P<day>[0-3]?\d)',
-    '%m': r'(?P<month_digit>1[0-2]|0?\d)',
+    '%d': r'(?P<day>\d?\d)',
+    '%m': r'(?P<month_digit>\d?\d)',
     '%y': r'(?P<year_short>\d\d)',
     '%Y': r'(?P<year>\d\d\d\d)',
-    '%H': r'(?P<hour>[0-5]?\d)',
-    '%I': r'(?P<hour_short>1[0-2]|0?\d)',
+    '%H': r'(?P<hour>\d?\d)',
+    '%I': r'(?P<hour_short>\d?\d)',
     '%p': r'(?P<period>[aA][mM]|[pP][mM])',
-    '%M': r'(?P<minute>[0-5]?\d)',
-    '%S': r'(?P<second>[0-5]?\d)',
+    '%M': r'(?P<minute>\d?\d)',
+    '%S': r'(?P<second>\d?\d)',
     '%f': r'(?P<microsecond>\d\d\d\d\d\d)',
     '%z': r'(?P<UTC>[+-]\d\d\d\d)',
     '%Z': r'(?P<time_zone>UTC|EST|CST)',
@@ -82,20 +85,9 @@ get_format_standart_regexps = {  # noqa
     '%W': r'(?P<day_of_year_monday>\d\d)',
     # '%c': r'(?P<full_date>Tue Aug 16 21:30:00 1988)',
     '%x': r'(?P<date>\d\d[/.-]\d\d[/.-]\d\d)',
-    '%X': r'(?P<time>[0-5]?\d:[0-5]?\d:[0-5]?\d)',
+    '%X': r'(?P<time>\d?\d:\d?\d:\d?\d)',
 }
 update_get_format_standart_regexps()
-
-
-def add_root(url):
-    if not url:
-        return None
-    if '://' not in url:
-        if url[0] is not '/':
-            url = '/' + url
-        return settings.ROOT_URL + url
-    else:
-        return url
 
 
 def get_format(
@@ -159,56 +151,142 @@ def get_format(
 
 
 def pop_from_str_by_regexp(string, regexp, default=None):
+    """Pop given first found match from strong."""
     match = re.search(regexp, string)
     if match:
-        match = match.group()
-        return re.sub(regexp, '', string), match
+        return re.sub(regexp, '', string, 1), match.group()
     else:
         return string, default
 
 
+def turn_date_to_dict(
+      string, match_order, *, regexps=get_format_standart_regexps, **kwargs):
+    """Return dictified date where keys are dt.strptime directives.
+
+    Params:
+    -------
+    string : str
+        String to dictify.
+    match_order : tuple of str
+        tuple of valid keys for 'regexps' dictionary. Must only contain keys
+        described in 'regexps' dictionary, keys also can be represented as
+        regular expressions. kwargs are updating regexps.
+    regexps : dict
+        A dictionary of regular expressions. Contain data in following format:
+            key - simple string;
+            value - regular expression;
+    """
+    if kwargs:
+        regexps.update(kwargs)
+
+    string = string.lower()
+    matched_keys = []
+    dictified_date = {}
+
+    for regexp_key in match_order:
+        # If regexp_key is represented as regular expression:
+        if '{' in regexp_key:
+            # Fill format replacement fields ('{%key}') with regexps.
+            regexp = regexp_key.format(**regexps)
+            # Extract key name from regexp
+            # By replacing anything in '()' and symbols '{', '}' to ''.
+            regexp_key = re.sub(r'\([^)]*\)|{|}', '', regexp_key)
+        else:
+            # Otherwise 'regexp_key' is a regular key, just get regexp.
+            regexp = regexps.get(regexp_key)
+            if not regexp:
+                raise ValueError('Invalid regexp key {}'.format(regexp_key))
+
+        # Don't process keys which are already matched.
+        if regexp_key in matched_keys:
+            continue
+
+        string, match = pop_from_str_by_regexp(string, regexp)
+
+        if match:
+            dictified_date[regexp_key] = match
+            matched_keys.append(regexp_key)
+
+        matched_keys.append(regexp_key)
+
+    return dictified_date
+
+
+def get_str_and_format(date_str, match_order, format_order=None):
+    """Return formatted string and valid datetime.strptime format for it."""
+    if not format_order:
+        # TODO Just use ordered dict for 'turn_date_to_dict' function.
+        # Order of elements in return string and format.
+        format_order = (
+            '%a',  # Week day (short)
+            '%A',  # Week day
+            '%w',  # Week day (int)
+            '%Y',  # Year (full \d\d\d\d)
+            '%y',  # Year (short \d\d)
+            '%b',  # Month (short)
+            '%B',  # Month
+            '%m',  # Month
+            '%d',  # Day
+            '%H',  # Hour
+            '%I',  # Hour (12-hour clock)
+            '%M',  # Minute
+            '%S',  # Second
+            '%p',  # Period (pm, am)
+            '%f',  # Microsecond
+            '%z',  # Timezone (int)
+            '%Z',  # Timezone (UTC, EST, CST)
+            '%j',  # Day of year
+            '%U',  # Week of year (sunday first)
+            '%W',  # Week of year (monday first)
+            # '%c': r'(?P<full_date>Tue Aug 16 21:30:00 1988)',
+            '%x',  # Date in format \d\d.\d\d.\d\d (depending on locale)
+            '%X',  # Time in format \d\d:\d\d:\d\d (depending on locale)
+        )
+
+    date_map = turn_date_to_dict(date_str, match_order)
+    directives = []
+    values = []
+    for directive in format_order:
+        if directive in date_map:
+            directives.append(directive)
+            values.append(date_map[directive])
+
+    return (' '.join(values), ' '.join(directives))
+
+
 def complement_each_other(
-        pieces, fetch_order, regexps=get_format_standart_regexps):
-    dictified_pieces = []
+        date_pieces, match_order, regexps=get_format_standart_regexps):
+    dictified_date_pieces = []
 
     # Transfer strings to dict
-    for piece in pieces:
-        matched_keys = []
-        current_piece_dict = {}
-        dictified_pieces.append(current_piece_dict)
+    for piece in date_pieces:
+        dictified_date_pieces.append(turn_date_to_dict(piece, match_order))
 
-        for regexp_key in fetch_order:
-            if '{' in regexp_key:
-                # Fill format replacement fields ('{%key}') with regexps.
-                regexp = regexp_key.format(**regexps)
-                # Extract key name from regexp
-                # By replacing anything in '()' and symbols '{', '}' to ''.
-                regexp_key = re.sub(r'\([^)]*\)|{|}', '', regexp_key)
-            else:
-                # Otherwise 'regexp_key' is a regular key, just get regexp.
-                regexp = regexps.get(regexp_key)
+    complicated_dates = []
+    # Update each other dict in dictified_date_pieces with not existing keys.
+    for dictified_date_piece in dictified_date_pieces:
+        supplementing_date_dict = dictified_date_piece.copy()
 
-            # Don't process keys which are already matched.
-            if regexp_key in matched_keys:
-                continue
+        for dictified_another_date_piece in dictified_date_pieces:
+            if dictified_date_piece is not dictified_another_date_piece:
+                for key, value in dictified_another_date_piece.items():
+                    if key not in supplementing_date_dict:
+                        supplementing_date_dict[key] = value
 
-            piece, match = pop_from_str_by_regexp(piece, regexp)
+        complicated_dates.append(supplementing_date_dict)
 
-            if match:
-                current_piece_dict[regexp_key] = match
-                matched_keys.append(regexp_key)
+    return complicated_dates
 
-    for piece_dict in dictified_pieces:
-        for another_piece_dict in dictified_pieces:
-            if piece_dict is not another_piece_dict:
-                for key in another_piece_dict:
-                    if key not in piece_dict:
-                        piece_dict[key] = another_piece_dict[key]
 
-    return tuple(
-            (' '.join(piece_dict.values()), ' '.join(piece_dict.keys()))
-            for piece_dict in dictified_pieces
-        )
+def add_root(url):
+    if not url:
+        return None
+    if '://' not in url:
+        if url[0] is not '/':
+            url = '/' + url
+        return settings.ROOT_URL + url
+    else:
+        return url
 
 
 def get_soup(url, *, method='get', parser='html.parser', **kwargs):
