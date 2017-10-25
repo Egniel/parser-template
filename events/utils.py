@@ -1,5 +1,6 @@
 from datetime import datetime
 from datetime import timedelta
+from datetime import time
 import re
 import itertools
 import calendar
@@ -326,6 +327,7 @@ def parse_weeks(string, delimiters=('-')):
         get_format_standart_regexps.get('%a'),
     ))
 
+    string = string.lower()
     handled_weeks = []
 
     # Get all weeks.
@@ -389,18 +391,24 @@ def get_soup(url, *, method='get', parser='html.parser', **kwargs):
 
 
 def date_range_generator(start_date, end_date):
-    if start_date.date() == end_date.date():
-        yield start_date, end_date
-        return
+    """Yield all dates between two enclude edges."""
+    for day in range((end_date - start_date).days + 1):
+        yield start_date + timedelta(days=day)
 
-    yield start_date, start_date.replace(hour=23, minute=59)
 
-    start_date = start_date.replace(hour=00, minute=00)
+def datetime_range_generator(start_date, end_date, **time_kwargs):
+    """Yield all 'datetime's between two dates enclude edges."""
+    yield start_date
+
+    if time_kwargs:
+        date_between = datetime.combine(start_date.date(), time(**time_kwargs))
+    else:
+        date_between = start_date
+
     for day in range(1, (end_date.date() - start_date.date()).days):
-        date_between = start_date + timedelta(days=day)
-        yield (date_between, date_between.replace(hour=23, minute=59))
+        yield date_between + timedelta(days=day)
 
-    yield end_date.replace(hour=00, minute=00), end_date
+    yield end_date
 
 
 def fetch_from_page_generator(url, selector):
