@@ -150,11 +150,20 @@ def get_format(
     return datetime_format
 
 
-def pop_from_str_by_regexp(string, regexp, default=None):
-    """Pop given first found match from strong."""
-    match = re.search(regexp, string)
-    if match:
-        return re.sub(regexp, '', string, 1), match.group()
+def pop_from_str_by_regexp(string, regexp, default=None, count=0):
+    """Pop 'count' amout of matches from given 'string'.
+
+    Return:
+    ------
+    Poped string and list of matches or
+    (if match not found) given string and default.
+    """
+    matches = re.findall(regexp, string)
+    if matches:
+        if count is 0:
+            return re.sub(regexp, '', string), matches
+        else:
+            return re.sub(regexp, '', string, count=count), matches[:count]
     else:
         return string, default
 
@@ -201,10 +210,11 @@ def turn_date_to_dict(
         if regexp_key in matched_keys:
             continue
 
-        string, match = pop_from_str_by_regexp(string, regexp)
+        # Pop first match
+        string, match = pop_from_str_by_regexp(string, regexp, count=1)
 
         if match:
-            dictified_date[regexp_key] = match
+            dictified_date[regexp_key] = match[0]
             matched_keys.append(regexp_key)
 
         matched_keys.append(regexp_key)
@@ -276,6 +286,84 @@ def complement_each_other(
         complicated_dates.append(supplementing_date_dict)
 
     return complicated_dates
+
+
+def get_weeks_between_two_enclude(start_day, end_day):
+    # Get locale depending week names.
+    week_abbrs = list(day_abbr.lower() for day_abbr in calendar.day_abbr)
+    week_names = list(day_name.lower() for day_name in calendar.day_name)
+
+    # Lead to single format.
+    start_day = start_day.lower()
+    end_day = end_day.lower()
+    if start_day in week_abbrs:
+        start_day = week_names[week_abbrs.index(start_day)]
+    if end_day in week_abbrs:
+        end_day = week_names[week_abbrs.index(end_day)]
+
+    # Get indexes to use them in slices.
+    start_day_index = week_names.index(start_day)
+    end_day_index = week_names.index(end_day)
+
+    if end_day_index >= start_day_index:
+        return week_names[start_day_index:end_day_index + 1]
+    else:
+        return week_names[start_day_index:] + week_names[:end_day_index + 1]
+
+
+def parse_weeks(string, delimiters=('-')):
+    """Return list of all weeks from 'string'.
+
+    Parameters:
+    -----------
+    String : str
+        String to get week days from.
+    delimiters : tuple of str
+        tuple of delimiters which specify that two weeks are week-range.
+    """
+    week_regexp = '|'.join((
+        get_format_standart_regexps.get('%A'),
+        get_format_standart_regexps.get('%a'),
+    ))
+
+    handled_weeks = []
+
+    # Get all weeks.
+    matched_weeks_objects = re.finditer(week_regexp, string)
+    prev_match_obj = next(matched_weeks_objects, None)
+    if not prev_match_obj:
+        return
+    first_iteration = True
+    for curr_match_obj in matched_weeks_objects:
+        # Try to find delimiter right between two weeks
+        # to detect if it is a week-range.
+        delimiter_match = None
+        for delimiter in delimiters:
+            delimiter_match = re.fullmatch(
+                # Delimiter with possibe spaces.
+                r' ?{} ?'.format(delimiter),
+                # Text between curr and previous matched weeks.
+                string[prev_match_obj.end():curr_match_obj.start()]
+            )
+            # Stop after first match
+            if delimiter_match:
+                break
+
+        if delimiter_match:
+            handled_weeks.extend(
+                get_weeks_between_two_enclude(
+                    prev_match_obj.group(),
+                    curr_match_obj.group()
+                )
+            )
+        else:
+            # Special case for first iteration.
+            if first_iteration:
+                handled_weeks.append(prev_match_obj.group())
+                first_iteration = False
+            handled_weeks.append(curr_match_obj.group())
+
+    return handled_weeks
 
 
 def add_root(url):
