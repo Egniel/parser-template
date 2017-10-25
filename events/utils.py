@@ -25,7 +25,19 @@ EVENT_REQUIRED_FIELDS = tuple(
         )
 )
 
+
+REQUIRED_DIRECTIVES = (
+    ('%Y', '%y'),
+    ('%b', '%B', '%m'),
+    ('%d',),
+)
+
 last_get_format_language = None
+
+
+class DateIsNotValidError(Exception):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 
 class ResponseIsNot200Error(Exception):
@@ -169,7 +181,7 @@ def pop_from_str_by_regexp(string, regexp, default=None, count=0):
         return string, default
 
 
-def turn_date_to_dict(
+def date_str_to_dict(
       string, match_order, *, regexps=get_format_standart_regexps, **kwargs):
     """Return dictified date where keys are dt.strptime directives.
 
@@ -226,7 +238,7 @@ def turn_date_to_dict(
 def get_str_and_format(date_str, match_order, format_order=None):
     """Return formatted string and valid datetime.strptime format for it."""
     if not format_order:
-        # TODO Just use ordered dict for 'turn_date_to_dict' function.
+        # TODO Just use ordered dict for 'date_str_to_dict' function.
         # Order of elements in return string and format.
         format_order = (
             '%a',  # Week day (short)
@@ -254,7 +266,7 @@ def get_str_and_format(date_str, match_order, format_order=None):
             '%X',  # Time in format \d\d:\d\d:\d\d (depending on locale)
         )
 
-    date_map = turn_date_to_dict(date_str, match_order)
+    date_map = date_str_to_dict(date_str, match_order)
     directives = []
     values = []
     for directive in format_order:
@@ -271,7 +283,7 @@ def complement_each_other(
 
     # Transfer strings to dict
     for piece in date_pieces:
-        dictified_date_pieces.append(turn_date_to_dict(piece, match_order))
+        dictified_date_pieces.append(date_str_to_dict(piece, match_order))
 
     complicated_dates = []
     # Update each other dict in dictified_date_pieces with not existing keys.
@@ -366,6 +378,97 @@ def parse_weeks(string, delimiters=('-')):
             handled_weeks.append(curr_match_obj.group())
 
     return handled_weeks
+
+
+def date_range_generator(start_date, end_date):
+    """Yield all dates between two enclude edges."""
+    for day in range((end_date - start_date).days + 1):
+        yield start_date + timedelta(days=day)
+
+
+def datetime_range_generator(start_date, end_date, **time_kwargs):
+    """Yield all 'datetime's between two dates enclude edges."""
+    yield start_date
+
+    if time_kwargs:
+        date_between = datetime.combine(start_date.date(), time(**time_kwargs))
+    else:
+        date_between = start_date
+
+    for day in range(1, (end_date.date() - start_date.date()).days):
+        yield date_between + timedelta(days=day)
+
+    yield end_date
+
+
+def date_dicts_to_datetime(date_dicts_list):
+    curr_year = datetime.now().year
+
+    transformed_dates = []
+    for date_dict in date_dicts_list:
+        # TODO Not a proper way %x and %X will break this.
+        if '%Y' not in date_dict and '%y' not in date_dict:
+            date_dict['%Y'] = curr_year
+
+        for directives in REQUIRED_DIRECTIVES:
+            # At least one key must exist.
+            for key in directives:
+                if key in date_dict:
+                    break
+            else:
+                raise DateIsNotValidError(
+                    'Missing some of directives: {}'.format(directives))
+
+        transformed_dates.append(
+            datetime.strptime(
+                ' '.join(date_dict.values()),
+                ' '.join(date_dict.keys())
+            )
+        )
+
+    return transformed_dates
+
+
+def parse_date(date_str, match_order):
+    date_str = date_str_to_dict(date_str, match_order)
+    return date_dicts_to_datetime(date_str)[0]
+
+
+def parse_dates(dates_str_list, match_order, with_autocomplementing=False):
+    if with_autocomplementing:
+        dictified_dates = complement_each_other(dates_str_list)
+    else:
+        dictified_dates = tuple(
+            date_str_to_dict(date_str, match_order)
+            for date_str in dates_str_list
+        )
+
+    return date_dicts_to_datetime(dictified_dates)
+
+
+def parse_date_range(start_and_end, match_order, with_autocomplementing=False):
+    if len(start_and_end) != 2:
+        raise AttributeError(
+            'Unexpected lenth of start_and_end iterable. '
+            'Expected lenth 2, got {}.'.format(
+                len(start_and_end))
+        )
+    if with_autocomplementing:
+        dictified_dates = complement_each_other(start_and_end)
+    else:
+        dictified_dates = tuple(
+            date_str_to_dict(date_str, match_order)
+            for date_str in start_and_end
+        )
+
+    return datetime_range_generator(
+        *date_dicts_to_datetime(dictified_dates)
+    )
+
+
+def get_weekday_by_int(weekday_int):
+    week_names = list(day_name.lower() for day_name in calendar.day_name)
+    return week_names[weekday_int]
 
 
 def add_root(url):
