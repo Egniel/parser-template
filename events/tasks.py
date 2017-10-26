@@ -57,7 +57,6 @@ def validate_event_fields(fields, ignore=(), *other_field_names):
     return True
 
 
-# Not tested, care. TODO Delete comment.
 def dump_to_db(fields, dates=None):
     if not dates:
         dates = utils.datetime_range_generator(fields.pop('start_time'),
