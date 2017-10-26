@@ -18,7 +18,7 @@ import events.utils as utils
 from events.encoders import ObjectWithTimestampEncoder
 from events.models import Event
 from events.models import EventCategory
-# from {{ project_name }}.celery import app
+from {{ project_name }}.celery import app
 
 
 EVENT_REQUIRED_FIELDS = tuple(
