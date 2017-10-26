@@ -387,7 +387,7 @@ def datetime_range_generator(start_date, end_date, **time_kwargs):
 
 
 def date_dicts_to_datetime(date_dicts_list):
-    curr_year = datetime.now().year
+    curr_year = str(datetime.now().year)
 
     transformed_dates = []
     for date_dict in date_dicts_list:
@@ -415,8 +415,8 @@ def date_dicts_to_datetime(date_dicts_list):
 
 
 def parse_date(date_str, match_order):
-    date_str = date_str_to_dict(date_str, match_order)
-    return date_dicts_to_datetime(date_str)[0]
+    date_dict = date_str_to_dict(date_str, match_order)
+    return date_dicts_to_datetime((date_dict,))[0]
 
 
 def parse_dates(dates_str_list, match_order, with_autocomplementing=False):
