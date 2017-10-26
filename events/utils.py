@@ -85,7 +85,7 @@ get_format_standart_regexps = {  # noqa
     '%x': r'(?P<date>\d\d[/.-]\d\d[/.-]\d\d)',
     '%X': r'(?P<time>\d?\d:\d?\d:\d?\d)',
 }
-update_get_format_standart_regexps()
+update_get_format_standart_regexps(settings.DEFAULT_LANGUAGE)
 
 
 def get_format(
