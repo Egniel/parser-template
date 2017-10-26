@@ -1,6 +1,5 @@
 from datetime import datetime
 from datetime import timedelta
-from datetime import time
 import re
 import itertools
 import calendar
@@ -376,7 +375,7 @@ def datetime_range_generator(start_date, end_date, **time_kwargs):
     yield start_date
 
     if time_kwargs:
-        date_between = datetime.combine(start_date.date(), time(**time_kwargs))
+        date_between = start_date.replace(**time_kwargs)
     else:
         date_between = start_date
 
