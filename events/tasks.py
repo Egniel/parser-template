@@ -12,12 +12,13 @@ from django.utils import translation
 from requests import ConnectionError
 from requests import RequestException
 from requests import Timeout
+from django.db.models.fields import NOT_PROVIDED
 
 import events.utils as utils
 from events.encoders import ObjectWithTimestampEncoder
 from events.models import Event
 from events.models import EventCategory
-from {{ project_name }}.celery import app
+# from {{ project_name }}.celery import app
 
 
 EVENT_REQUIRED_FIELDS = tuple(
@@ -57,7 +58,7 @@ def validate_event_fields(fields, ignore=(), *other_field_names):
 
 
 # Not tested, care. TODO Delete comment.
-def dump_to_db(fields, , dates=None):
+def dump_to_db(fields, dates=None):
     if not dates:
         dates = utils.datetime_range_generator(fields.pop('start_time'),
                                                fields.pop('end_time'),

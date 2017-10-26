@@ -10,9 +10,6 @@ from contextlib import contextmanager
 import requests
 from django.conf import settings
 from bs4 import BeautifulSoup
-from django.db.models.fields import NOT_PROVIDED
-
-from events.models import Event
 
 REQUIRED_DIRECTIVES = (
     ('%Y', '%y'),
