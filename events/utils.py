@@ -16,7 +16,7 @@ REQUIRED_DIRECTIVES = (
     ('%d',),
 )
 
-last_get_format_language = None
+CURR_REGEXPS_LOCALE = None
 
 
 class DateIsNotValidError(Exception):
@@ -32,12 +32,13 @@ class ResponseIsNot200Error(Exception):
 @contextmanager
 def set_locale(locale_):
     initial_locale = '.'.join(locale.getlocale())
+    # TODO make better.
     locale_ = locale.normalize(locale_ + '.utf8')
     yield locale.setlocale(locale.LC_ALL, locale_)
     locale.setlocale(locale.LC_ALL, initial_locale)
 
 
-# TODO move everything relative to 'get_format' in one class
+# TODO group everything relative to date parsing
 def get_locale_depending_format_regexps(locale_=None):
     if locale_ is None:
         locale_ = '.'.join(locale.getlocale())
@@ -56,12 +57,12 @@ def update_get_format_standart_regexps(language=None): # noqa
     if language is None:
         language = locale.getlocale()[0]
 
-    global last_get_format_language
-    if language is not last_get_format_language:
+    global CURR_REGEXPS_LOCALE
+    if language is not CURR_REGEXPS_LOCALE:
         get_format_standart_regexps.update(
             get_locale_depending_format_regexps(language)
             )
-        last_get_format_language = language
+        CURR_REGEXPS_LOCALE = language
 
 get_format_standart_regexps = {  # noqa
     '%w': r'(?P<weekday_digit>[0-6])',
@@ -165,109 +166,98 @@ def pop_from_str_by_regexp(string, regexp, default=None, count=0):
         return string, default
 
 
-def date_str_to_dict(
-      string, match_order, *, regexps=get_format_standart_regexps, **kwargs):
-    """Return dictified date where keys are dt.strptime directives.
+def render_regexps_co(string, regexps, directives=None, **extensions):
+    """Return iterator which yields matched directives in format (dir, match).
 
-    Params:
-    -------
+    Function purpose is to render 'regexps' which supposed to be a associate
+    structure of 'key: regular_expression_which_represents_key'.
+
+    Function uses regular expressions described in 'regexps' dictionary(as
+    values) to search matches in string. If match found it yielded as tuple of
+    '(key_of_regular_expression_which_was_used_to_find match, match)'. If
+    'directives' passed then only keys described in 'directives' are rendered.
+
+    Parameters:
+    -----------
     string : str
-        String to dictify.
-    match_order : tuple of str
-        tuple of valid keys for 'regexps' dictionary. Must only contain keys
-        described in 'regexps' dictionary, keys also can be represented as
-        regular expressions. kwargs are updating regexps.
+        String to search in.
     regexps : dict
-        A dictionary of regular expressions. Contain data in following format:
-            key - simple string;
-            value - regular expression;
+        Dictionary of possible directives and regular expression which
+        represent directive.
+    directives : iterable
+        Iterable(list, tuple any other) of directives to render.
+    **extensions : directive=regular expression
+        Extensions for regexps dictionary for single call. Source dictionary
+        will not change(care, regular copy, not deep).
+
+    Send:
+    -----
+    You can used 'send' method to pass additional directives to render.
+
+    Note:
+    -----
+    Function is a coroutine which can be used as regular generator-function.
     """
-    if kwargs:
-        regexps.update(kwargs)
+    if extensions:
+        regexps = regexps.copy()
+        regexps.update(extensions)
 
     string = string.lower()
-    matched_keys = []
-    dictified_date = {}
+    matched_directives = []
 
-    for regexp_key in match_order:
-        # If regexp_key is represented as regular expression:
-        if '{' in regexp_key:
+    if not directives:
+        directives = regexps.keys()
+
+    directives = list(directives)
+
+    for directive in directives:
+        # Represented as regular expression:
+        if '{' in directive:
+            # TODO add description of feature to docstring
             # Fill format replacement fields ('{%key}') with regexps.
-            regexp = regexp_key.format(**regexps)
+            regexp = directive.format(**regexps)
             # Extract key name from regexp
-            # By replacing anything in '()' and symbols '{', '}' to ''.
-            regexp_key = re.sub(r'\([^)]*\)|{|}', '', regexp_key)
+            directive = re.sub(r'\([^)]*\)|{|}', '', directive)
         else:
             # Otherwise 'regexp_key' is a regular key, just get regexp.
-            regexp = regexps.get(regexp_key)
+            regexp = regexps.get(directive)
             if not regexp:
-                raise ValueError('Invalid regexp key {}'.format(regexp_key))
+                raise ValueError('Invalid directive {}'.format(directive))
 
         # Don't process keys which are already matched.
-        if regexp_key in matched_keys:
+        if directive in matched_directives:
             continue
 
         # Pop first match
         string, match = pop_from_str_by_regexp(string, regexp, count=1)
 
         if match:
-            dictified_date[regexp_key] = match[0]
-            matched_keys.append(regexp_key)
-
-        matched_keys.append(regexp_key)
-
-    return dictified_date
+            matched_directives.append(directive)
+            sent_directive = yield (directive, match[0])
+            if sent_directive:
+                directives.append(sent_directive)
 
 
-def get_str_and_format(date_str, match_order, format_order=None):
-    """Return formatted string and valid datetime.strptime format for it."""
-    if not format_order:
-        # TODO Just use ordered dict for 'date_str_to_dict' function.
-        # Order of elements in return string and format.
-        format_order = (
-            '%a',  # Week day (short)
-            '%A',  # Week day
-            '%w',  # Week day (int)
-            '%Y',  # Year (full \d\d\d\d)
-            '%y',  # Year (short \d\d)
-            '%b',  # Month (short)
-            '%B',  # Month
-            '%m',  # Month
-            '%d',  # Day
-            '%H',  # Hour
-            '%I',  # Hour (12-hour clock)
-            '%M',  # Minute
-            '%S',  # Second
-            '%p',  # Period (pm, am)
-            '%f',  # Microsecond
-            '%z',  # Timezone (int)
-            '%Z',  # Timezone (UTC, EST, CST)
-            '%j',  # Day of year
-            '%U',  # Week of year (sunday first)
-            '%W',  # Week of year (monday first)
-            # '%c': r'(?P<full_date>Tue Aug 16 21:30:00 1988)',
-            '%x',  # Date in format \d\d.\d\d.\d\d (depending on locale)
-            '%X',  # Time in format \d\d:\d\d:\d\d (depending on locale)
-        )
+def date_str_to_dict(string, directives):
+    """Return dictified date where keys are dt.strptime directives.
 
-    date_map = date_str_to_dict(date_str, match_order)
-    directives = []
-    values = []
-    for directive in format_order:
-        if directive in date_map:
-            directives.append(directive)
-            values.append(date_map[directive])
-
-    return (' '.join(values), ' '.join(directives))
+    Params:
+    -------
+    string : str
+        String to dictify.
+    directives : str
+        str of valid dt.strptime directives separated by space.
+    """
+    return dict(render_regexps_co(
+        string, get_format_standart_regexps, directives.split(' ')))
 
 
-def complement_each_other(
-        date_pieces, match_order, regexps=get_format_standart_regexps):
+def complement_each_other(date_pieces, directives):
     dictified_date_pieces = []
 
     # Transfer strings to dict
     for piece in date_pieces:
-        dictified_date_pieces.append(date_str_to_dict(piece, match_order))
+        dictified_date_pieces.append(date_str_to_dict(piece, directives))
 
     complicated_dates = []
     # Update each other dict in dictified_date_pieces with not existing keys.
@@ -413,24 +403,24 @@ def date_dicts_to_datetime(date_dicts_list):
     return transformed_dates
 
 
-def parse_date(date_str, match_order):
-    date_dict = date_str_to_dict(date_str, match_order)
+def parse_date(date_str, directives):
+    date_dict = date_str_to_dict(date_str, directives)
     return date_dicts_to_datetime((date_dict,))[0]
 
 
-def parse_dates(dates_str_list, match_order, with_autocomplementing=False):
+def parse_dates(dates_str_list, directives, with_autocomplementing=False):
     if with_autocomplementing:
-        dictified_dates = complement_each_other(dates_str_list)
+        dictified_dates = complement_each_other(dates_str_list, directives)
     else:
         dictified_dates = tuple(
-            date_str_to_dict(date_str, match_order)
+            date_str_to_dict(date_str, directives)
             for date_str in dates_str_list
         )
 
     return date_dicts_to_datetime(dictified_dates)
 
 
-def parse_date_range(start_and_end, match_order, with_autocomplementing=False):
+def parse_date_range(start_and_end, directives, with_autocomplementing=False):
     if len(start_and_end) != 2:
         raise AttributeError(
             'Unexpected lenth of start_and_end iterable. '
@@ -438,10 +428,10 @@ def parse_date_range(start_and_end, match_order, with_autocomplementing=False):
                 len(start_and_end))
         )
     if with_autocomplementing:
-        dictified_dates = complement_each_other(start_and_end)
+        dictified_dates = complement_each_other(start_and_end, directives)
     else:
         dictified_dates = tuple(
-            date_str_to_dict(date_str, match_order)
+            date_str_to_dict(date_str, directives)
             for date_str in start_and_end
         )
 
@@ -560,3 +550,10 @@ def render_dict_by_func(func, args_before=(), args_after=(), *, render_dict):
         field_name: func(*args_before, *render_dict[field_name], *args_after)
         for field_name in render_dict
         }
+
+
+def send(coroutine, value=None, default=None):
+    try:
+        return coroutine.send(value)
+    except StopIteration:
+        return default
