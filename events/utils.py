@@ -58,7 +58,7 @@ def update_get_format_standart_regexps(language=None): # noqa
         language = locale.getlocale()[0]
 
     global CURR_REGEXPS_LOCALE
-    if language is not CURR_REGEXPS_LOCALE:
+    if language != CURR_REGEXPS_LOCALE:
         get_format_standart_regexps.update(
             get_locale_depending_format_regexps(language)
             )
@@ -441,8 +441,33 @@ def parse_date_range(start_and_end, directives, with_autocomplementing=False):
 
 
 def get_weekday_by_int(weekday_int):
-    week_names = list(day_name.lower() for day_name in calendar.day_name)
-    return week_names[weekday_int]
+    return calendar.day_name[weekday_int].lower()
+
+
+def extract_time_from_str(str_with_time):
+    fetched_times = []
+    hour = re.search(r'(?<!:|\d)\d?\d(?=:|[AaPp][Mm])', str_with_time)
+    while hour:
+        shift = hour.end()
+        # Check for minutes after hour.
+        if str_with_time[shift:shift + 1] is ':':
+            minute = re.search(r'\d\d', str_with_time[shift:shift + 3])
+            minute = minute.group() if minute else '00'
+        else:
+            minute = '00'
+
+        time = ':'.join((hour.group(), minute))
+
+        fetched_times.append(time)
+
+        # Find next.
+        str_with_time = str_with_time[shift:]
+        hour = re.search(
+            r'(?<!:|\d)\d?\d(?=:|[AaPp][Mm])',
+            str_with_time
+        )
+
+    return fetched_times
 
 
 def add_root(url):
@@ -542,7 +567,7 @@ def getattr_in_select(soup, css_selector, attr=None, default=None):
     return select
 
 
-def render_dict_by_func(func, args_before=(), args_after=(), *, render_dict):
+def render_dict_by_func(func, render_dict, args_before=(), args_after=()):
     """
     Apply 'func' to 'render_dict' values. Return dict of rendered values.
     """
@@ -550,10 +575,3 @@ def render_dict_by_func(func, args_before=(), args_after=(), *, render_dict):
         field_name: func(*args_before, *render_dict[field_name], *args_after)
         for field_name in render_dict
         }
-
-
-def send(coroutine, value=None, default=None):
-    try:
-        return coroutine.send(value)
-    except StopIteration:
-        return default
