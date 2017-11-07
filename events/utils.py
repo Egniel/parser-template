@@ -10,24 +10,6 @@ import requests
 from django.conf import settings
 from bs4 import BeautifulSoup
 
-REQUIRED_DIRECTIVES = (
-    ('%Y', '%y'),
-    ('%b', '%B', '%m'),
-    ('%d',),
-)
-
-CURR_REGEXPS_LOCALE = None
-
-
-class DateIsNotValidError(Exception):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-
-class ResponseIsNot200Error(Exception):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
 
 @contextmanager
 def set_locale(locale_):
@@ -38,20 +20,31 @@ def set_locale(locale_):
     locale.setlocale(locale.LC_ALL, initial_locale)
 
 
-# TODO group everything relative to date parsing
-def get_locale_depending_format_regexps(locale_=None):
+REQUIRED_DIRECTIVES = (
+    ('%Y', '%y'),
+    ('%b', '%B', '%m'),
+    ('%d', '%X'),
+)
+
+CURR_REGEXPS_LOCALE = None
+
+class DateIsNotValidError(Exception):  # noqa
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+def get_locale_depending_datetime_regexps(locale_=None):  # noqa
     if locale_ is None:
         locale_ = '.'.join(locale.getlocale())
 
     with set_locale(locale_):
-        locale_depending_format_regexps = {
+        locale_depending_datetime_regexps = {
             '%a': '|'.join(calendar.day_abbr).lower(),
             '%A': '|'.join(calendar.day_name).lower(),
             '%b': '|'.join(calendar.month_abbr[1:]).lower(),
             '%B': '|'.join(calendar.month_name[1:]).lower(),
         }
 
-    return locale_depending_format_regexps
+    return locale_depending_datetime_regexps
 
 def update_get_format_standart_regexps(language=None): # noqa
     if language is None:
@@ -59,12 +52,12 @@ def update_get_format_standart_regexps(language=None): # noqa
 
     global CURR_REGEXPS_LOCALE
     if language != CURR_REGEXPS_LOCALE:
-        get_format_standart_regexps.update(
-            get_locale_depending_format_regexps(language)
+        DATETIME_REGEXPS.update(
+            get_locale_depending_datetime_regexps(language)
             )
         CURR_REGEXPS_LOCALE = language
 
-get_format_standart_regexps = {  # noqa
+DATETIME_REGEXPS = {  # noqa
     '%w': r'(?P<weekday_digit>[0-6])',
     '%d': r'(?P<day>\d?\d)',
     '%m': r'(?P<month_digit>\d?\d)',
@@ -89,7 +82,7 @@ update_get_format_standart_regexps(settings.DEFAULT_LANGUAGE)
 
 
 def get_format(
-      string, replace_order, *, regexps=get_format_standart_regexps, **kwargs):
+      string, replace_order, *, regexps=DATETIME_REGEXPS, **kwargs):
     """Return valid datetime.strptime format by given string and order.
 
     Function iterates over 'replace_order' tuple (which is a tuple of valid
@@ -249,7 +242,7 @@ def date_str_to_dict(string, directives):
         str of valid dt.strptime directives separated by space.
     """
     return dict(render_regexps_co(
-        string, get_format_standart_regexps, directives.split(' ')))
+        string, DATETIME_REGEXPS, directives.split(' ')))
 
 
 def complement_each_other(date_pieces, directives):
@@ -277,20 +270,20 @@ def complement_each_other(date_pieces, directives):
 
 def get_weeks_between_two_enclude(start_day, end_day):
     # Get locale depending week names.
-    week_abbrs = list(day_abbr.lower() for day_abbr in calendar.day_abbr)
     week_names = list(day_name.lower() for day_name in calendar.day_name)
 
-    # Lead to single format.
-    start_day = start_day.lower()
-    end_day = end_day.lower()
-    if start_day in week_abbrs:
-        start_day = week_names[week_abbrs.index(start_day)]
-    if end_day in week_abbrs:
-        end_day = week_names[week_abbrs.index(end_day)]
+    start_day, end_day = start_day.lower(), end_day.lower()
+    start_day_index = end_day_index = None
 
-    # Get indexes to use them in slices.
-    start_day_index = week_names.index(start_day)
-    end_day_index = week_names.index(end_day)
+    for weekday_name in week_names:
+        if start_day in weekday_name:
+            start_day_index = week_names.index(weekday_name)
+        if end_day in weekday_name:
+            end_day_index = week_names.index(weekday_name)
+
+    if start_day_index is None or end_day_index is None:
+        raise ValueError('Some of week names are not valid: {}'.format(
+            (start_day, end_day)))
 
     if end_day_index >= start_day_index:
         return week_names[start_day_index:end_day_index + 1]
@@ -299,7 +292,7 @@ def get_weeks_between_two_enclude(start_day, end_day):
 
 
 def parse_weeks(string, delimiters=('-')):
-    """Return list of all weeks from 'string'.
+    """Return list of all weeks from 'string' enclude week-ranges.
 
     Parameters:
     -----------
@@ -309,8 +302,8 @@ def parse_weeks(string, delimiters=('-')):
         tuple of delimiters which specify that two weeks are week-range.
     """
     week_regexp = '|'.join((
-        get_format_standart_regexps.get('%A'),
-        get_format_standart_regexps.get('%a'),
+        DATETIME_REGEXPS.get('%A'),
+        DATETIME_REGEXPS.get('%a'),
     ))
 
     string = string.lower()
@@ -365,8 +358,10 @@ def datetime_range_generator(start_date, end_date, **time_kwargs):
     yield start_date
 
     if time_kwargs:
+        # Set time which will be used for every 'between' date by urself.
         date_between = start_date.replace(**time_kwargs)
     else:
+        # Use 'start_date's time otherwise.
         date_between = start_date
 
     for day in range(1, (end_date.date() - start_date.date()).days):
@@ -375,23 +370,41 @@ def datetime_range_generator(start_date, end_date, **time_kwargs):
     yield end_date
 
 
+def dt_range_to_pairs_of_start_end_time(dates):
+    dates = list(dates)
+
+    if dates[0].date() == dates[-1].date():
+        return (dates[0], dates[-1])
+
+    # start time
+    yield (dates[0], dates[0].replace(hour=23, minute=59))
+
+    for date in dates[1:-1]:
+        yield (date, date.replace(hour=23, minute=59))
+
+    # end time
+    yield (dates[-1].replace(hour=0, minute=0), dates[-1])
+
+
 def date_dicts_to_datetime(date_dicts_list):
     curr_year = str(datetime.now().year)
 
     transformed_dates = []
     for date_dict in date_dicts_list:
-        # TODO Not a proper way %x and %X will break this.
+        # TODO Not a proper way. %x and %X will break this.
         if '%Y' not in date_dict and '%y' not in date_dict:
             date_dict['%Y'] = curr_year
 
-        for directives in REQUIRED_DIRECTIVES:
+        for directives_list in REQUIRED_DIRECTIVES:
             # At least one key must exist.
-            for key in directives:
-                if key in date_dict:
+            for directive in directives_list:
+                if directive in date_dict:
                     break
+            # Successfully completed iteration means that 'date_dict'
+            # does not contain any of required directives.
             else:
                 raise DateIsNotValidError(
-                    'Missing some of directives: {}'.format(directives))
+                    'Missing some of directives: {}'.format(directives_list))
 
         transformed_dates.append(
             datetime.strptime(
@@ -418,26 +431,6 @@ def parse_dates(dates_str_list, directives, with_autocomplementing=False):
         )
 
     return date_dicts_to_datetime(dictified_dates)
-
-
-def parse_date_range(start_and_end, directives, with_autocomplementing=False):
-    if len(start_and_end) != 2:
-        raise AttributeError(
-            'Unexpected lenth of start_and_end iterable. '
-            'Expected lenth 2, got {}.'.format(
-                len(start_and_end))
-        )
-    if with_autocomplementing:
-        dictified_dates = complement_each_other(start_and_end, directives)
-    else:
-        dictified_dates = tuple(
-            date_str_to_dict(date_str, directives)
-            for date_str in start_and_end
-        )
-
-    return datetime_range_generator(
-        *date_dicts_to_datetime(dictified_dates)
-    )
 
 
 def get_weekday_by_int(weekday_int):
@@ -484,12 +477,12 @@ def add_root(url):
 def get_soup(url, *, method='get', parser='html.parser', **kwargs):
     url = add_root(url)
 
-    page = getattr(requests, method)(url, **kwargs)
-    if page.status_code != 200:
-        raise ResponseIsNot200Error(
-            'Response from \'{}\' is not 200'.format(page.url))
+    res = getattr(requests, method)(url, **kwargs)
+    if res.status_code != 200:
+        raise requests.ConnectionError(
+            'Response from \'{}\' is not 200'.format(res.url))
 
-    return BeautifulSoup(page.content, parser)
+    return BeautifulSoup(res.content, parser)
 
 
 def fetch_from_page_generator(url, selector):
