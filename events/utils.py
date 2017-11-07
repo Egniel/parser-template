@@ -11,6 +11,20 @@ from django.conf import settings
 from bs4 import BeautifulSoup
 
 
+def unite(*args):
+    united = {}
+    for dictionary in args:
+        for key, value in dictionary.items():
+            united[key] = value
+    return united
+
+
+def process(fields, processors):
+    for processor in processors:
+        processor(fields)
+    return fields
+
+
 @contextmanager
 def set_locale(locale_):
     initial_locale = '.'.join(locale.getlocale())

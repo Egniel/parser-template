@@ -18,6 +18,9 @@ import events.utils as utils
 from events.encoders import ObjectWithTimestampEncoder
 from events.models import Event
 from events.models import EventCategory
+from events.utils import get_fields_by_select_match as render
+from events.utils import dump_to_db, process, unite
+import events.processors as processors
 from {{ project_name }}.celery import app
 
 
