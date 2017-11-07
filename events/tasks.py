@@ -54,7 +54,13 @@ def post_events():
         payload = event_data.get('fields')
 
         try:
-            r = requests.post(url, json=payload)
+            r = requests.post(
+                url,
+                json=payload,
+                headers=dict(
+                    Authorization='Token {}'.format(settings.AUTH_TOKEN),
+                ),
+            )
         except (RequestException, ConnectionError, Timeout):
             logger.debug(
                 "We've problem with continue posting, posted {} events".format(
