@@ -1,7 +1,5 @@
 import json
 import logging
-from datetime import datetime
-from datetime import timedelta
 
 import requests
 from bs4 import BeautifulSoup
@@ -9,28 +7,80 @@ from django.conf import settings
 from django.core import serializers
 from django.utils import timezone
 from django.utils import translation
-from requests import ConnectionError
-from requests import RequestException
-from requests import Timeout
+from requests import ConnectionError, RequestException, Timeout
+from django.db.models.fields import NOT_PROVIDED
 
 import events.utils as utils
 from events.encoders import ObjectWithTimestampEncoder
-from events.models import Event
-from events.models import EventCategory
-from events.utils import get_fields_by_select_match as render
-from events.utils import dump_to_db, process, unite
+from events.models import Event, EventCategory
 import events.processors as processors
+import dateparser
 from {{ project_name }}.celery import app
 
+EVENT_MODEL_REQUIRED_FIELDS = tuple(
+    field.name
+    for field in Event._meta.fields if (
+        field.blank is False and
+        field.null is False and
+        field.default is NOT_PROVIDED
+        )
+)
 
 curr_timezone = timezone.get_default_timezone()
 
 logger = logging.getLogger('{{ project_name }}')
 
 
-@app.task()
+def validate_event_fields(fields, ignore=(), *other_field_names):
+    """Check that 'fields' dict contain all required fields of Event model."""
+    # At least one must exist
+    if 'address' not in ignore and 'place_title' not in ignore:
+        if not fields.get('address') and not fields.get('place_title'):
+            return False, 'address or place_title'
+
+    validation_field_names = list(EVENT_MODEL_REQUIRED_FIELDS)
+    validation_field_names.extend(other_field_names)
+
+    # Validate fields which are required for 'Event' model.
+    # (fields which can't be null, blank, and have no defaults)
+    for field_name in validation_field_names:
+        # Check that field exists and has value,
+        if field_name not in ignore and not fields.get(field_name):
+            return False, field_name
+    return True, None
+
+
+@app.task(name='events.dump_to_db')
+def dump_to_db(fields, dates=None):
+    if not dates:
+        dates = utils.datetime_range_generator(fields.pop('start_time'),
+                                               fields.pop('end_time'),
+                                               hour=0, minute=0)
+        dates = dt_range_to_pairs_of_start_end_time(dates)
+
+    categories = fields.pop('categories', None)
+    if categories:
+        categories = tuple(
+            EventCategory.objects.get_or_create(title=category)[0]
+            for category in categories
+        )
+
+    with translation.override(settings.DEFAULT_LANGUAGE):
+        for start_time, end_time in dates:
+            event_obj, created = Event.objects.update_or_create(
+                origin_url=fields['origin_url'],
+                start_time=start_time,
+                end_time=end_time,
+                defaults=fields,
+            )
+            if created and categories:
+                for category in categories:
+                    event_obj.categories.add(category)
+
+
+@app.task(name='events.parse_events')
 def parse_events():
-    pass
+    utils.get_robots_txt()
 
 
 @app.task(name='events.post_events')
@@ -45,6 +95,8 @@ def post_events():
 
     logger.debug('Trying to post {} events'.format(qs.count()))
 
+    headers = {
+        'Authorization': 'Token {}'.format(settings.MIDDLEWARE_AUTH_TOKEN) }
     for event in qs:
         event_json_data = serializers.serialize(
             'json', [event, ], cls=ObjectWithTimestampEncoder,
@@ -54,13 +106,7 @@ def post_events():
         payload = event_data.get('fields')
 
         try:
-            r = requests.post(
-                url,
-                json=payload,
-                headers=dict(
-                    Authorization='Token {}'.format(settings.AUTH_TOKEN),
-                ),
-            )
+            r = requests.post(url, json=payload, headers=headers)
         except (RequestException, ConnectionError, Timeout):
             logger.debug(
                 "We've problem with continue posting, posted {} events".format(

@@ -9,246 +9,190 @@ from contextlib import contextmanager
 import requests
 from django.conf import settings
 from bs4 import BeautifulSoup
-from django.utils import translation
-from django.db.models.fields import NOT_PROVIDED
-
-from events.models import Event
-from events.models import EventCategory
-
-EVENT_REQUIRED_FIELDS = tuple(
-    field.name
-    for field in Event._meta.fields if (
-        field.blank is False and
-        field.null is False and
-        field.default is NOT_PROVIDED
-        )
-)
-
-last_get_format_language = None
 
 
-class ResponseIsNot200Error(Exception):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-
-def unite(*args):
-    united = {}
-    for dictionary in args:
-        for key, value in dictionary.items():
-            united[key] = value
-    return united
-
-
-def process(fields, processors):
-    for processor in processors:
-        processor(fields)
-    return fields
+def get_robots_txt(base_url=settings.ROOT_URL):
+    requests.get('/'.join((base_url, 'robots.txt')))
 
 
 @contextmanager
 def set_locale(locale_):
     initial_locale = '.'.join(locale.getlocale())
+    # TODO make better.
     locale_ = locale.normalize(locale_ + '.utf8')
     yield locale.setlocale(locale.LC_ALL, locale_)
     locale.setlocale(locale.LC_ALL, initial_locale)
 
 
-# TODO move everything relative to 'get_format' in one class
-def get_locale_depending_format_regexps(locale_=None):
-    if locale_ is None:
-        locale_ = '.'.join(locale.getlocale())
+def get_weeks_between_two_enclude(start_day, end_day):
+    # Get locale depending week names.
+    week_names = list(day_name.lower() for day_name in calendar.day_name)
 
-    with set_locale(locale_):
-        locale_depending_format_regexps = {
-            '%a': '|'.join(calendar.day_abbr),
-            '%A': '|'.join(calendar.day_name),
-            '%b': '|'.join(calendar.month_abbr[1:]),
-            '%B': '|'.join(calendar.month_name[1:]),
-        }
+    start_day, end_day = start_day.lower(), end_day.lower()
+    start_day_index = end_day_index = None
 
-    return locale_depending_format_regexps
+    for weekday_name in week_names:
+        if start_day in weekday_name:
+            start_day_index = week_names.index(weekday_name)
+        if end_day in weekday_name:
+            end_day_index = week_names.index(weekday_name)
 
-def update_get_format_standart_regexps(language=settings.DEFAULT_LANGUAGE): # noqa
-    global last_get_format_language
-    if language is not last_get_format_language:
-        get_format_standart_regexps.update(
-            get_locale_depending_format_regexps(language)
+    if start_day_index is None or end_day_index is None:
+        raise ValueError('Some of week names are not valid: {}'.format(
+            (start_day, end_day)))
+
+    if end_day_index >= start_day_index:
+        return week_names[start_day_index:end_day_index + 1]
+    else:
+        return week_names[start_day_index:] + week_names[:end_day_index + 1]
+
+
+# TODO: Simplify.
+def parse_weeks(string, delimiters=('-')):
+    """Return list of all weeks from 'string' enclude week-ranges.
+
+    Parameters:
+    -----------
+    String : str
+        String to get week days from.
+    delimiters : tuple of str
+        tuple of delimiters which specify that two weeks are week-range.
+    """
+    # 'calendar' uses current locale.
+    week_regexp = '|'.join((
+        '|'.join(calendar.day_abbr).lower(),
+        '|'.join(calendar.day_name).lower(),
+    ))
+
+    string = string.lower()
+    handled_weeks = []
+
+    # Get all weeks.
+    matched_weeks_objects = re.finditer(week_regexp, string)
+    prev_match_obj = next(matched_weeks_objects, None)
+    if not prev_match_obj:
+        return
+    first_iteration = True
+    for curr_match_obj in matched_weeks_objects:
+        # Try to find delimiter right between two weeks
+        # to detect if it is a week-range.
+        delimiter_match = None
+        for delimiter in delimiters:
+            delimiter_match = re.fullmatch(
+                # Delimiter with possibe spaces.
+                r' ?{} ?'.format(delimiter),
+                # Text between curr and previous matched weeks.
+                string[prev_match_obj.end():curr_match_obj.start()]
             )
-        last_get_format_language = language
+            # Stop after first match
+            if delimiter_match:
+                break
 
-get_format_standart_regexps = {  # noqa
-    '%w': r'(?P<weekday_digit>[0-6])',
-    '%d': r'(?P<day>[0-3]?\d)',
-    '%m': r'(?P<month_digit>1[0-2]|0?\d)',
-    '%y': r'(?P<year_short>\d\d)',
-    '%Y': r'(?P<year>\d\d\d\d)',
-    '%H': r'(?P<hour>[0-5]?\d)',
-    '%I': r'(?P<hour_short>1[0-2]|0?\d)',
-    '%p': r'(?P<period>[aA][mM]|[pP][mM])',
-    '%M': r'(?P<minute>[0-5]?\d)',
-    '%S': r'(?P<second>[0-5]?\d)',
-    '%f': r'(?P<microsecond>\d\d\d\d\d\d)',
-    '%z': r'(?P<UTC>[+-]\d\d\d\d)',
-    '%Z': r'(?P<time_zone>UTC|EST|CST)',
-    '%j': r'(?P<day_of_year>\d\d\d)',
-    '%U': r'(?P<week_of_year_sunday>\d\d)',
-    '%W': r'(?P<day_of_year_monday>\d\d)',
-    # '%c': r'(?P<full_date>Tue Aug 16 21:30:00 1988)',
-    '%x': r'(?P<date>\d\d[/.-]\d\d[/.-]\d\d)',
-    '%X': r'(?P<time>[0-5]?\d:[0-5]?\d:[0-5]?\d)',
-}
-update_get_format_standart_regexps()
+        if delimiter_match:
+            handled_weeks.extend(
+                get_weeks_between_two_enclude(
+                    prev_match_obj.group(),
+                    curr_match_obj.group()
+                )
+            )
+        else:
+            # Special case for first iteration.
+            if first_iteration:
+                handled_weeks.append(prev_match_obj.group())
+                first_iteration = False
+            handled_weeks.append(curr_match_obj.group())
+
+    return handled_weeks
 
 
-def add_root(url):
+def date_range_generator(start_date, end_date):
+    """Yield all dates between two enclude edges."""
+    for day in range((end_date - start_date).days + 1):
+        yield start_date + timedelta(days=day)
+
+
+def datetime_range_generator(start_date, end_date, **time_kwargs):
+    """Yield all 'datetime's between two dates enclude edges."""
+    yield start_date
+
+    if time_kwargs:
+        # Set time which will be used for every 'between' date by urself.
+        date_between = start_date.replace(**time_kwargs)
+    else:
+        # Use 'start_date's time otherwise.
+        date_between = start_date
+
+    for day in range(1, (end_date.date() - start_date.date()).days):
+        yield date_between + timedelta(days=day)
+
+    yield end_date
+
+
+def dt_range_to_pairs_of_start_end_time(dates):
+    dates = list(dates)
+
+    if dates[0].date() == dates[-1].date():
+        yield (dates[0], dates[-1])
+        return  # Raises stop iteration
+
+    # start time
+    yield (dates[0], dates[0].replace(hour=23, minute=59))
+
+    for date in dates[1:-1]:
+        yield (date, date.replace(hour=23, minute=59))
+
+    # end time
+    yield (dates[-1].replace(hour=0, minute=0), dates[-1])
+
+
+def get_weekday_by_int(weekday_int):
+    return calendar.day_name[weekday_int].lower()
+
+
+def extract_time_from_str(str_with_time):
+    fetched_times = []
+    hour = re.search(r'(?<!:|\d)\d?\d(?=:\d\d|[AaPp][Mm])', str_with_time)
+    while hour:
+        shift = hour.end()
+        # Check for minutes after hour.
+        if str_with_time[shift:shift + 1] is ':':
+            minute = re.search(r'\d\d', str_with_time[shift:shift + 3])
+            minute = minute.group() if minute else '00'
+        else:
+            minute = '00'
+
+        time = ':'.join((hour.group(), minute))
+
+        fetched_times.append(time)
+
+        # Find next.
+        str_with_time = str_with_time[shift:]
+        hour = re.search(
+            r'(?<!:|\d)\d?\d(?=:|[AaPp][Mm])',
+            str_with_time
+        )
+
+    return fetched_times
+
+
+def add_root(root_url=settings.ROOT_URL, url):
     if not url:
         return None
     if '://' not in url:
         if url[0] is not '/':
             url = '/' + url
-        return settings.ROOT_URL + url
+        return root_url + url
     else:
         return url
 
 
-def get_format(
-      string, replace_order, *, regexps=get_format_standart_regexps, **kwargs):
-    """Return valid datetime.strptime format by given string and order.
-
-    Function iterates over 'replace_order' tuple (which is a tuple of valid
-    keys for 'regexps' dictionary), on each iteration it uses current
-    'replace_order' element to get regular expression from 'regexps' dict, and
-    try to find match in 'string' by given regular expression. If match is
-    found, then whole match will be replaced with a key of regular expression
-    that was used to find match. You can describe one 'replace_order' for few
-    different format types. You also can use look ahead/behind assertion to
-    specify where key supposed to be in the 'string'.
-
-    Params:
-    -------
-    string : str
-        String to get format from.
-    replace_order : tuple of str
-        tuple of valid keys for 'regexps' dictionary. Must only contain keys
-        described in 'regexps' dictionary, keys also can be represented as
-        regular expressions.
-    regexps : dict
-        A dictionary of regular expressions. Contain data in following format:
-            key - simple string;
-            value - regular expression;
-    """
-    if kwargs:
-        regexps.update(kwargs)
-
-    datetime_format = string.lower()
-    matched_keys = []
-
-    for regexp_key in replace_order:
-        # If regexp_key is represented as regular expression:
-        if '{' in regexp_key:
-            # Fill format replacement fields ('{%key}') with regexps.
-            regexp = regexp_key.format(**regexps)
-            # Extract key name from regexp
-            # By replacing anything in '()' and symbols '{', '}' to ''.
-            regexp_key = re.sub(r'\([^)]*\)|{|}', '', regexp_key)
-        else:
-            # Otherwise 'regexp_key' is a regular key, just get regexp.
-            regexp = regexps.get(regexp_key)
-
-        # Don't process keys which are already matched.
-        if regexp_key in matched_keys:
-            continue
-
-        datetime_format = re.sub(
-            regexp,  # Find match.
-            regexp_key,  # Replace to key.
-            datetime_format,
-            count=1  # Replace only first match.
-        )
-
-        matched_keys.append(regexp_key)
-
-    return datetime_format
-
-
-def pop_from_str_by_regexp(string, regexp, default=None):
-    match = re.search(regexp, string)
-    if match:
-        match = match.group()
-        return re.sub(regexp, '', string), match
-    else:
-        return string, default
-
-
-def complement_each_other(
-        pieces, fetch_order, regexps=get_format_standart_regexps):
-    dictified_pieces = []
-
-    # Transfer strings to dict
-    for piece in pieces:
-        matched_keys = []
-        current_piece_dict = {}
-        dictified_pieces.append(current_piece_dict)
-
-        for regexp_key in fetch_order:
-            if '{' in regexp_key:
-                # Fill format replacement fields ('{%key}') with regexps.
-                regexp = regexp_key.format(**regexps)
-                # Extract key name from regexp
-                # By replacing anything in '()' and symbols '{', '}' to ''.
-                regexp_key = re.sub(r'\([^)]*\)|{|}', '', regexp_key)
-            else:
-                # Otherwise 'regexp_key' is a regular key, just get regexp.
-                regexp = regexps.get(regexp_key)
-
-            # Don't process keys which are already matched.
-            if regexp_key in matched_keys:
-                continue
-
-            piece, match = pop_from_str_by_regexp(piece, regexp)
-
-            if match:
-                current_piece_dict[regexp_key] = match
-                matched_keys.append(regexp_key)
-
-    for piece_dict in dictified_pieces:
-        for another_piece_dict in dictified_pieces:
-            if piece_dict is not another_piece_dict:
-                for key in another_piece_dict:
-                    if key not in piece_dict:
-                        piece_dict[key] = another_piece_dict[key]
-
-    return tuple(
-            (' '.join(piece_dict.values()), ' '.join(piece_dict.keys()))
-            for piece_dict in dictified_pieces
-        )
-
-
 def get_soup(url, *, method='get', parser='html.parser', **kwargs):
-    url = add_root(url)
+    res = getattr(requests, method)(url, **kwargs)
+    if res.status_code != 200:
+        raise requests.ConnectionError(
+            'Response from \'{}\' is not 200'.format(res.url))
 
-    page = getattr(requests, method)(url, **kwargs)
-    if page.status_code != 200:
-        raise ResponseIsNot200Error(
-            'Response from \'{}\' is not 200'.format(page.url))
-
-    return BeautifulSoup(page.content, parser)
-
-
-def date_range_generator(start_date, end_date):
-    if start_date.date() == end_date.date():
-        yield start_date, end_date
-        return
-
-    yield start_date, start_date.replace(hour=23, minute=59)
-
-    start_date = start_date.replace(hour=00, minute=00)
-    for day in range(1, (end_date.date() - start_date.date()).days):
-        date_between = start_date + timedelta(days=day)
-        yield (date_between, date_between.replace(hour=23, minute=59))
-
-    yield end_date.replace(hour=00, minute=00), end_date
+    return BeautifulSoup(res.content, parser)
 
 
 def fetch_from_page_generator(url, selector):
@@ -296,106 +240,14 @@ def fetch_from_page_until_by_url_generator(
             break
 
 
-def getattr_in_select(soup, css_selector, attr=None, default=None):
-    '''Return regular bs4.select_one value or attr value if attr defined.
-
-    Arguments
-    ---------
-    soup : BeautifulSoup
-        Page soup to search elements in.
-    attr : str, optional
-        Attribute to get. If is None then regular select_one value will be
-        returned.
-    default : any, optional
-        Value to return in any except cases (no select found, no attr).
-    '''
-    select = soup.select_one(css_selector)
-
-    if select is None:
+def getattr_in_soup(soup, attr, default=None):
+    if soup is None:
         return default
 
-    if attr:
-        # Try to get attr from bs4_tag.attrs dictionary(for tag.href etc).
-        select_attr = select.get(attr)
-        if select_attr is None:
-            # Otherwise return regular attr or default(for tag.text etc).
-            return getattr(select, attr, default)
-        else:
-            return select_attr
-
-    return select
-
-
-def get_fields_by_select_match(soup, fields):
-    """Return dict of 'getattr_in_select' results by given 'fields' dict.
-
-    Params
-    ------
-    soup : BeautifulSoup
-        Page soup to search elements in.
-    fields : dictionary
-        Dictionary where key - name of field, value - tuple of arguments for
-        'getattr_in_select' function.
-    """
-    return {
-        field_name: getattr_in_select(soup, *fields[field_name])
-        for field_name in fields
-        }
-
-
-def validate_event_fields(fields, ignore=(), *other_field_names):
-    """Check that 'fields' dict contain all required fields of Event model."""
-    # At least one must exist
-    if not fields.get('address') and not fields.get('place_title'):
-        return False
-
-    # Validate fields which are required for 'Event' model.
-    # (fields which can't be null, blank, and have no defaults)
-    for field_name in EVENT_REQUIRED_FIELDS:
-        # Check that field exists and has value,
-        if field_name not in ignore and not fields.get(field_name):
-            return False
-
-    # Validate your castom fields.
-    for field_name in other_field_names:
-        if not fields.get(field_name):
-            return False
-
-    return True
-
-
-def dump_to_db(
-        fields, language=settings.DEFAULT_LANGUAGE, dates=None, timezone=None):
-    if timezone:
-        if dates:
-            dates = tuple(timezone.localize(date) for date in dates)
-        else:
-            fields['start_time'] = timezone.localize(fields['start_time'])
-            fields['end_time'] = timezone.localize(fields['end_time'])
-
-    if dates:
-        # If given 'dates' is a list of simgle dates
-        # (not of tuples of start and end time)
-        if dates and not hasattr(dates[0], '__iter__'):
-            dates = tuple(
-                (start_date, start_date.replace(hour=23, minute=59))
-                for start_date in dates
-                )
+    # Try to get attr from bs4_tag.attrs dictionary(for tag.href etc).
+    soup_attr = soup.get(attr)
+    if soup_attr is None:
+        # Otherwise return regular attr or default(for tag.text etc).
+        return getattr(soup, attr, default)
     else:
-        dates = date_range_generator(fields.pop('start_time'),
-                                     fields.pop('end_time'))
-
-    categories = fields.pop('categories', None)
-    with translation.override(language):
-        for start_time, end_time in dates:
-            event_obj, created = Event.objects.update_or_create(
-                origin_url=fields['origin_url'],
-                start_time=start_time,
-                end_time=end_time,
-                defaults=fields,
-            )
-
-            if created and categories:
-                for category in categories:
-                    event_obj.categories.add(
-                        EventCategory.objects.get_or_create(title=category)[0])
+        return soup_attr
