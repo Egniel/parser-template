@@ -38,6 +38,7 @@ class EventCategory(models.Model):
         return self.title
 
     class Meta:
+        ordering = ['title']
         verbose_name = 'категория событий'
         verbose_name_plural = 'категории событий'
 
