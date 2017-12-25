@@ -12,7 +12,6 @@ from requests import ConnectionError, RequestException, Timeout
 import events.utils as utils
 from events.encoders import ObjectWithTimestampEncoder
 from events.models import Event, EventCategory
-import events.processors as processors
 import dateparser
 from {{ project_name }}.celery import app
 
@@ -28,7 +27,7 @@ def validate_event_fields(fields, ignore=()):
         if not fields.get('address') and not fields.get('place_title'):
             return False, 'address or place_title'
 
-    return validate_fields(Event, fields, ignore)
+    return utils.validate_fields(Event, fields, ignore)
 
 
 @app.task(name='events.dump_to_db')
@@ -37,7 +36,7 @@ def dump_to_db(fields, dates=None):
         dates = utils.datetime_range_generator(fields.pop('start_time'),
                                                fields.pop('end_time'),
                                                hour=0, minute=0)
-        dates = dt_range_to_pairs_of_start_end_time(dates)
+        dates = utils.dt_range_to_pairs_of_start_end_time(dates)
 
     categories = fields.pop('categories', None)
     with translation.override(settings.DEFAULT_LANGUAGE):
@@ -50,10 +49,11 @@ def dump_to_db(fields, dates=None):
                 defaults=fields,
             )
             if created and categories:
-                event_obj.categories.add(
-                    safe_update_or_create(
-                        EventCategory, title=category_name)[0]
-                )
+                for category_name in categories:
+                    event_obj.categories.add(
+                        utils.safe_update_or_create(
+                            EventCategory, title=category_name)[0]
+                    )
 
 
 @app.task(name='events.parse_events')
