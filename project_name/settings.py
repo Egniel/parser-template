@@ -182,3 +182,9 @@ try:
 except ImportError:
     import logging
     logging.warn("There's no local settings file, running with stock settings")
+
+try:
+    from .settings_dev import *  # noqa
+except ImportError:
+    import logging
+    logging.warn("There's no dev settings file, running with stock settings")

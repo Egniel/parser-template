@@ -251,3 +251,68 @@ def getattr_in_soup(soup, attr, default=None):
         return getattr(soup, attr, default)
     else:
         return soup_attr
+
+
+def truncate_fields_gen(model, fields_dict, ignore=()):
+    """Yield fields truncated by max_length(if they have it)."""
+    for field_name, field_value in fields_dict.items():
+        max_length = getattr(model._meta.get_field(field_name), 'max_length')
+        if field_name in ignore or not max_length:
+            continue
+        yield (field_name, (field_value or '')[:max_length])
+
+
+def validate_fields(model, fields_dict, ignore=()):
+    """
+    Check that all required fields have positive value('bool(value) == True').
+    Field is 'required' if it have no 'default' and 'null=False'.
+    """
+    for field_name in fields_dict.keys():
+        field = model._meta.get_field(field_name)
+        if (field_name not in ignore and not fields_dict[field_name] and
+                type(field.default).__name__ == 'NOT_PROVIDED' and
+                field.null is False):
+            return False, field_name
+    return True, None
+
+
+def safe_update_or_create(model, defaults=None, **search_fields):
+    """
+    Update or create for celery projects to avoid 'MultipleObjectsReturned'.
+    """
+    defaults = defaults or {}
+    defaults.update(search_fields)
+
+    obj = model.objects.filter(**search_fields).first()
+    if obj:
+        model.objects.filter(pk=obj.pk).update(**defaults)
+        return obj, False
+    else:
+        obj = model.objects.create(**defaults)
+        return obj, True
+
+
+def dump_to_db(fields, dates=None):
+    if not dates:
+        dates = utils.datetime_range_generator(fields.pop('start_time'),
+                                               fields.pop('end_time'),
+                                               hour=0, minute=0)
+        dates = utils.dt_range_to_pairs_of_start_end_time(dates)
+
+    categories = fields.pop('categories', None)
+    fields.update(truncate_fields_gen(Event, fields))
+    with translation.override(settings.DEFAULT_LANGUAGE):
+        for start_time, end_time in dates:
+            event_obj, created = utils.safe_update_or_create(
+                Event,
+                origin_url=fields['origin_url'],
+                start_time=start_time,
+                end_time=end_time,
+                defaults=fields,
+            )
+            if created and categories:
+                for category_name in categories:
+                    event_obj.categories.add(
+                        utils.safe_update_or_create(
+                            EventCategory, title=category_name)[0]
+                    )
