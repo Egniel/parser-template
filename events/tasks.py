@@ -23,59 +23,12 @@ EVENT_MODEL_REQUIRED_FIELDS = tuple(
         field.blank is False and
         field.null is False and
         field.default is NOT_PROVIDED
-        )
+    )
 )
 
 curr_timezone = timezone.get_default_timezone()
 
 logger = logging.getLogger('{{ project_name }}')
-
-
-def validate_event_fields(fields, ignore=(), *other_field_names):
-    """Check that 'fields' dict contain all required fields of Event model."""
-    # At least one must exist
-    if 'address' not in ignore and 'place_title' not in ignore:
-        if not fields.get('address') and not fields.get('place_title'):
-            return False, 'address or place_title'
-
-    validation_field_names = list(EVENT_MODEL_REQUIRED_FIELDS)
-    validation_field_names.extend(other_field_names)
-
-    # Validate fields which are required for 'Event' model.
-    # (fields which can't be null, blank, and have no defaults)
-    for field_name in validation_field_names:
-        # Check that field exists and has value,
-        if field_name not in ignore and not fields.get(field_name):
-            return False, field_name
-    return True, None
-
-
-@app.task(name='events.dump_to_db')
-def dump_to_db(fields, dates=None):
-    if not dates:
-        dates = utils.datetime_range_generator(fields.pop('start_time'),
-                                               fields.pop('end_time'),
-                                               hour=0, minute=0)
-        dates = dt_range_to_pairs_of_start_end_time(dates)
-
-    categories = fields.pop('categories', None)
-    if categories:
-        categories = tuple(
-            EventCategory.objects.get_or_create(title=category)[0]
-            for category in categories
-        )
-
-    with translation.override(settings.DEFAULT_LANGUAGE):
-        for start_time, end_time in dates:
-            event_obj, created = Event.objects.update_or_create(
-                origin_url=fields['origin_url'],
-                start_time=start_time,
-                end_time=end_time,
-                defaults=fields,
-            )
-            if created and categories:
-                for category in categories:
-                    event_obj.categories.add(category)
 
 
 @app.task(name='events.parse_events')
