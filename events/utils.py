@@ -1,4 +1,3 @@
-from datetime import datetime
 from datetime import timedelta
 import re
 import itertools
@@ -7,8 +6,22 @@ import locale
 from contextlib import contextmanager
 
 import requests
+from django.db.models.fields import NOT_PROVIDED
+from django.utils import translation
 from django.conf import settings
 from bs4 import BeautifulSoup
+
+from events.models import Event, EventCategory
+
+
+EVENT_MODEL_REQUIRED_FIELDS = tuple(
+    field.name
+    for field in Event._meta.fields if (
+        field.blank is False and
+        field.null is False and
+        field.default is NOT_PROVIDED
+    )
+)
 
 
 def get_robots_txt(base_url=settings.ROOT_URL):
@@ -175,7 +188,7 @@ def extract_time_from_str(str_with_time):
     return fetched_times
 
 
-def add_root(root_url=settings.ROOT_URL, url):
+def add_root(url, root_url=settings.ROOT_URL):
     if not url:
         return None
     if '://' not in url:
@@ -204,7 +217,11 @@ def fetch_from_page_generator(url, selector):
 
 
 def fetch_from_page_until_by_url_generator(
-                               url_template, selector, *, until, start_page=1):
+        url_template,
+        selector,
+        *,
+        until,
+        start_page=1):
     """Yield all elements from site page matched by 'selector' selector.
 
     Generator iterates over site pages using 'url_template' (which have to
@@ -294,16 +311,17 @@ def safe_update_or_create(model, defaults=None, **search_fields):
 
 def dump_to_db(fields, dates=None):
     if not dates:
-        dates = utils.datetime_range_generator(fields.pop('start_time'),
-                                               fields.pop('end_time'),
-                                               hour=0, minute=0)
-        dates = utils.dt_range_to_pairs_of_start_end_time(dates)
+        dates = datetime_range_generator(
+            fields.pop('start_time'),
+            fields.pop('end_time'),
+            hour=0, minute=0)
+        dates = dt_range_to_pairs_of_start_end_time(dates)
 
     categories = fields.pop('categories', None)
     fields.update(truncate_fields_gen(Event, fields))
     with translation.override(settings.DEFAULT_LANGUAGE):
         for start_time, end_time in dates:
-            event_obj, created = utils.safe_update_or_create(
+            event_obj, created = safe_update_or_create(
                 Event,
                 origin_url=fields['origin_url'],
                 start_time=start_time,
@@ -313,6 +331,6 @@ def dump_to_db(fields, dates=None):
             if created and categories:
                 for category_name in categories:
                     event_obj.categories.add(
-                        utils.safe_update_or_create(
+                        safe_update_or_create(
                             EventCategory, title=category_name)[0]
                     )

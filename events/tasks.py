@@ -6,25 +6,14 @@ from bs4 import BeautifulSoup
 from django.conf import settings
 from django.core import serializers
 from django.utils import timezone
-from django.utils import translation
 from requests import ConnectionError, RequestException, Timeout
-from django.db.models.fields import NOT_PROVIDED
 
 import events.utils as utils
 from events.encoders import ObjectWithTimestampEncoder
-from events.models import Event, EventCategory
-import events.processors as processors
+from events.models import Event
 import dateparser
 from {{ project_name }}.celery import app
 
-EVENT_MODEL_REQUIRED_FIELDS = tuple(
-    field.name
-    for field in Event._meta.fields if (
-        field.blank is False and
-        field.null is False and
-        field.default is NOT_PROVIDED
-    )
-)
 
 curr_timezone = timezone.get_default_timezone()
 
@@ -49,7 +38,7 @@ def post_events():
     logger.debug('Trying to post {} events'.format(qs.count()))
 
     headers = {
-        'Authorization': 'Token {}'.format(settings.MIDDLEWARE_AUTH_TOKEN) }
+        'Authorization': 'Token {}'.format(settings.MIDDLEWARE_AUTH_TOKEN)}
     for event in qs:
         event_json_data = serializers.serialize(
             'json', [event, ], cls=ObjectWithTimestampEncoder,
