@@ -286,7 +286,6 @@ def validate_fields(model, fields_dict, ignore=()):
     """
     for field_name in fields_dict.keys():
         field = model._meta.get_field(field_name)
-
         if (field_name not in ignore and not fields_dict[field_name] and
                 type(field.default).__name__ == 'NOT_PROVIDED' and
                 field.null is False):
