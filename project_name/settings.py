@@ -40,6 +40,10 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'events',
+    'django_celery_beat',
+    'django_celery_results',
+    'rangefilter',
+    'raven.contrib.django.raven_compat',
 ]
 
 MIDDLEWARE = [
@@ -89,16 +93,16 @@ DATABASES = {
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',  # noqa
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',  # noqa
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',  # noqa
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',  # noqa
     },
 ]
 
@@ -120,8 +124,14 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/{{ docs_version }}/howto/static-files/
 
+def rel(path, base_dir=BASE_DIR):
+    return os.path.join(base_dir, path)
+
+
+STATIC_ROOT = rel('static')
 STATIC_URL = '/static/'
 
+CELERY_RESULT_BACKEND = 'django-db'
 CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
@@ -176,6 +186,12 @@ DEFAULT_LANGUAGE = MODELTRANSLATION_LANGUAGES[0]
 ROOT_URL = '{{ project_name }}'  # TODO: Change this to real root
 
 ORIGIN = re.search(r'(?<=://)[^/]*', ROOT_URL).group()
+
+try:
+    from .settings_dev import *  # noqa
+except ImportError:
+    import logging
+    logging.warn("There's no dev settings file, running with stock settings")
 
 try:
     from .settings_local import *  # noqa

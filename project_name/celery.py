@@ -12,13 +12,17 @@ os.environ.setdefault(
 class Celery(celery.Celery):
 
     def on_configure(self):
-        client = raven.Client(settings.SENTRY_URL)
+        client = raven.Client(settings.SENTRY_URL)  # noqa
 
         # register a custom filter to filter out duplicate logs
         register_logger_signal(client)
 
         # hook into the Celery error handler
         register_signal(client)
+
+        client.tags_context(
+            dict(PROJECT_GIT_REMOTE=os.environ.get('PROJECT_GIT_REMOTE')),
+        )
 
 
 app = Celery(__name__)

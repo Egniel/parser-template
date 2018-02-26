@@ -18,6 +18,7 @@ class Command(BaseCommand):
             name='Parse events', defaults=dict(
                 crontab=schedule,
                 task='events.parse_events_with_pre_action')
+
         )
 
         post_schedule, _ = CrontabSchedule.objects.get_or_create(
@@ -31,4 +32,4 @@ class Command(BaseCommand):
             name='Post events', defaults=dict(
                 crontab=post_schedule,
                 task='events.post_events_with_pre_action')
-        )
+

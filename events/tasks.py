@@ -6,54 +6,17 @@ from bs4 import BeautifulSoup
 from django.conf import settings
 from django.core import serializers
 from django.utils import timezone
-from django.utils import translation
 from requests import ConnectionError, RequestException, Timeout
 
 import events.utils as utils
 from events.encoders import ObjectWithTimestampEncoder
-from events.models import Event, EventCategory
+from events.models import Event
 import dateparser
 from {{ project_name }}.celery import app
 
 curr_timezone = timezone.get_default_timezone()
 
 logger = logging.getLogger('{{ project_name }}')
-
-
-def validate_event_fields(fields, ignore=()):
-    """Check that 'fields' dict contain all required fields of Event model."""
-    # At least one must exist
-    if 'address' not in ignore and 'place_title' not in ignore:
-        if not fields.get('address') and not fields.get('place_title'):
-            return False, 'address or place_title'
-
-    return utils.validate_fields(Event, fields, ignore)
-
-
-@app.task(name='events.dump_to_db')
-def dump_to_db(fields, dates=None):
-    if not dates:
-        dates = utils.datetime_range_generator(fields.pop('start_time'),
-                                               fields.pop('end_time'),
-                                               hour=0, minute=0)
-        dates = utils.dt_range_to_pairs_of_start_end_time(dates)
-
-    categories = fields.pop('categories', None)
-    with translation.override(settings.DEFAULT_LANGUAGE):
-        for start_time, end_time in dates:
-            event_obj, created = utils.safe_update_or_create(
-                Event,
-                origin_url=fields['origin_url'],
-                start_time=start_time,
-                end_time=end_time,
-                defaults=fields,
-            )
-            if created and categories:
-                for category_name in categories:
-                    event_obj.categories.add(
-                        utils.safe_update_or_create(
-                            EventCategory, title=category_name)[0]
-                    )
 
 
 @app.task(name='events.parse_events')
@@ -74,7 +37,7 @@ def post_events():
     logger.debug('Trying to post {} events'.format(qs.count()))
 
     headers = {
-        'Authorization': 'Token {}'.format(settings.MIDDLEWARE_AUTH_TOKEN) }
+        'Authorization': 'Token {}'.format(settings.MIDDLEWARE_AUTH_TOKEN)}
     for event in qs:
         event_json_data = serializers.serialize(
             'json', [event, ], cls=ObjectWithTimestampEncoder,
